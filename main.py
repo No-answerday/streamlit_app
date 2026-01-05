@@ -86,39 +86,38 @@ st.sidebar.header("검색 조건")
 cat_options = df["category"].unique().tolist()
 skin_options = df["skin_type"].unique().tolist()
 
-selected_cat = st.sidebar.multiselect("카테고리", cat_options, key="selected_cat")
-selected_skin = st.sidebar.selectbox("피부 타입", ["선택 안함"] + skin_options, key="selected_skin")
+st.sidebar.subheader("카테고리")
+
+selected_cat = []
+for cat in df["category"].unique():
+    if st.sidebar.checkbox(cat, key=f"cat_{cat}"):
+        selected_cat.append(cat)
+
+st.sidebar.subheader("피부 타입")
+
+selected_skin = []
+for skin in df["skin_type"].unique():
+    if st.sidebar.checkbox(skin, key=f"skin_{skin}"):
+        selected_skin.append(skin)
 
 
 
 # ===== 메인 =====
 st.subheader("제품명 검색")
 
-search_input = st.text_input("제품명을 입력하세요", key="search_input")
+search_keyword = st.session_state.get("search_keyword", "") 
+def on_search_change(): 
+    st.session_state.search_keyword = st.session_state.product_search 
 
-if search_input:
-    filtered_options = df[
-        df["product"].str.contains(search_input, case=False)
-    ]["product"].tolist()
-else:
-    filtered_options = []
+product_options = df["product"].unique().tolist() 
 
-selected_product = st.selectbox(
-    "추천 검색어",
-    options=[""] + filtered_options,
-    key="product_search"
-)
+selected_product = st.selectbox("제품명을 입력하거나 선택하세요", options=[""] + product_options, index=0, key="product_search", on_change=on_search_change) 
 
-# 실제 검색에 사용할 텍스트
-if selected_product:
-    search_text = selected_product
-elif search_input:
-    search_text = search_input
-else:
-    search_text = None
+# 검색어로 사용할 값 
+search_text = selected_product if selected_product else ""
 
 # 초기 상태 여부
-is_initial = (not search_text and not selected_cat and selected_skin == "선택 안함")
+is_initial = (not search_text and not selected_cat and not selected_skin)
 
 # 제품 정보
 if selected_product:
@@ -143,21 +142,15 @@ else:
 
     # 검색어 조건
     if search_text is not None:
-        filtered_df = filtered_df[
-            filtered_df["product"].str.contains(search_text, case=False)
-        ]
+        filtered_df = filtered_df[filtered_df["product"].str.contains(search_text, case=False)]
 
     # 카테고리 필터
     if selected_cat:
-        filtered_df = filtered_df[
-            filtered_df["category"].isin(selected_cat)
-        ]
+        filtered_df = filtered_df[filtered_df["category"].isin(selected_cat)]
 
     # 피부 타입 필터
-    if selected_skin != "선택 안함":
-        filtered_df = filtered_df[
-            filtered_df["skin_type"] == selected_skin
-        ]
+    if selected_skin:
+        filtered_df = filtered_df[filtered_df["skin_type"].isin(selected_skin)]
 
     # 평점 기준 정렬
     filtered_df = filtered_df.sort_values(by="score", ascending=False)
