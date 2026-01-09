@@ -108,11 +108,12 @@ def sidebar(df):
     # 평점 슬라이더
     st.sidebar.subheader("평점")
     min_rating, max_rating = st.sidebar.slider(
-        "",
+        "평점 범위",
         min_value=0.0,
         max_value=5.0,
         value=(0.0, 5.0),
-        step=0.1
+        step=0.1,
+        label_visibility="collapsed",
     )
 
     # 가격 슬라이더
@@ -122,11 +123,12 @@ def sidebar(df):
     df_max = int(df["price"].max())
 
     min_price, max_price = st.sidebar.slider(
-        "",
+        "가격 범위",
         min_value=df_min,
         max_value=df_max,
         value=(df_min, df_max),
-        step=1000
+        step=1000,
+        label_visibility="collapsed",
     )
 
     return selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price
