@@ -9,12 +9,13 @@ import css
 from pathlib import Path
 import sys
 import os
+from load_data import load_reviews_map
+import re
 
 if "product_search" not in st.session_state:
     st.session_state["product_search"] = ""
 if "search_keyword" not in st.session_state:
     st.session_state["search_keyword"] = ""
-
 
 sys.path.append(os.path.dirname(__file__))
 
@@ -35,6 +36,10 @@ df = make_df(df)
 skin_options = df["skin_type"].unique().tolist()
 product_options = df["product_name"].unique().tolist()
 
+# ===== 리뷰 맵 로딩 (없으면 None) =====
+# data/reviews_map.parquet (review_id, review_text) 파일이 있을 때만 대표리뷰 텍스트 출력
+reviews_df = load_reviews_map()
+
 # ===== 사이드바 =====
 selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price = sidebar(df)
 
@@ -42,10 +47,13 @@ selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price = 
 st.title("화장품 추천 대시보드")
 st.subheader("제품명 검색")
 
-search_keyword = st.session_state.get("search_keyword", "") 
+search_keyword = st.session_state.get("search_keyword", "")
+
+
 def on_search_change():
     if "product_search" in st.session_state:
         st.session_state["search_keyword"] = st.session_state["product_search"]
+
 
 # 제품 선택 해제 버튼
 def clear_selected_product():
@@ -53,6 +61,7 @@ def clear_selected_product():
     st.session_state["product_search"] = ""
     st.session_state["search_keyword"] = ""
     scroll.request_scroll_to_top()
+
 
 # selectbox 컨테이너 안으로 이동
 with st.container(border=True):
@@ -62,13 +71,15 @@ with st.container(border=True):
         selected_product = st.selectbox(
             "제품명을 입력하거나 선택하세요",
             options=[""] + product_options,
-            index=0, key="product_search",
-            on_change=on_search_change # 제품 선택 시 검색 상태 동기화
+            index=0,
+            key="product_search",
+            on_change=on_search_change,  # 제품 선택 시 검색 상태 동기화
         )
 
     with col_clear:
         # 클릭 시 선택 제품 초기화
-        st.button("✕", key="clear_product", help="선택 해제", on_click=clear_selected_product)             
+        st.button("✕", key="clear_product", help="선택 해제", on_click=clear_selected_product)
+
 
 # 추천 상품 클릭
 def select_product_from_reco(product_name: str):
@@ -76,16 +87,29 @@ def select_product_from_reco(product_name: str):
     st.session_state["search_keyword"] = product_name
     scroll.request_scroll_to_top()
 
-# 검색어로 사용할 값 
+
+# 검색어로 사용할 값
 search_text = selected_product if selected_product else ""
 
 # 초기 상태 여부
 is_initial = (not search_text and not selected_sub_cat and not selected_skin)
 
+
+def rep_ids_to_list(rep_ids, n=3):
+    """representative_review_id가 list/str/단일값 어떤 형태든 n개로 정규화"""
+    if rep_ids is None or (isinstance(rep_ids, float) and pd.isna(rep_ids)):
+        return []
+    if isinstance(rep_ids, list):
+        return rep_ids[:n]
+    if isinstance(rep_ids, str):
+        return [x.strip() for x in re.split(r"[;,]", rep_ids) if x.strip()][:n]
+    return [rep_ids][:n]
+
+
 # 제품 정보
 if selected_product:
     product_info = df[df["product_name"] == selected_product].iloc[0]
-    
+
     st.subheader("선택한 제품 정보")
     col1, col2, col3 = st.columns(3)
 
@@ -101,6 +125,30 @@ if selected_product:
     if product_info.get("product_url"):
         st.link_button("상품 페이지", product_info["product_url"])
 
+    # ===== 요청사항: 대표 긍정 키워드 + 대표 리뷰 =====
+    # 대표 긍정 키워드
+    st.markdown("### 대표 긍정 키워드")
+    top_kw = product_info.get("top_keywords", "")
+    if isinstance(top_kw, list):
+        top_kw = ", ".join(top_kw)
+    st.write(top_kw if top_kw else "-")
+
+    # 대표 리뷰
+    st.markdown("### 대표 리뷰")
+    rep_ids = product_info.get("representative_review_id", None)
+    rep_list = rep_ids_to_list(rep_ids, n=3)
+
+    if reviews_df is None:
+        st.info("대표 리뷰를 표시하려면 data/reviews_map.parquet 파일이 필요해요.")
+    else:
+        mp = dict(zip(reviews_df["review_id"], reviews_df["review_text"]))
+        texts = [mp.get(rid) for rid in rep_list if rid in mp]
+
+        if not texts:
+            st.info("대표 리뷰를 찾지 못했어요. review_id 매칭을 확인해주세요.")
+        else:
+            for i, t in enumerate(texts, 1):
+                st.write(f"{i}. {t}")
 
 # ===== 추천 페이지 =====
 st.subheader("추천 상품")
@@ -124,7 +172,7 @@ else:
     # 페이지 초기화
     if "page" not in st.session_state:
         st.session_state.page = 1
-    
+
     st.session_state.page = min(st.session_state.page, total_pages)
 
     cur_filter = (search_text, tuple(selected_sub_cat), tuple(selected_skin), min_rating, max_rating, min_price, max_price)
@@ -235,3 +283,5 @@ else:
         )
 
 css.set_css()
+
+st.caption(f"top_keywords non-empty: {(df['top_keywords'].astype(str).str.len() > 0).mean():.2%}")
