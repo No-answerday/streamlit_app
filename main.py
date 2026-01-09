@@ -7,6 +7,10 @@ from load_data import load_raw_df, make_df
 from sidebar import sidebar, product_filter
 import css
 from pathlib import Path
+import sys
+import os
+
+sys.path.append(os.path.dirname(__file__))
 
 st.set_page_config(layout="wide")
 
