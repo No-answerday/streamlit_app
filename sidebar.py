@@ -1,85 +1,111 @@
 import streamlit as st
 
-def _toggle_all_subcats(all_key: str, sub_keys: list[str], clicked_flag_key: str):
-    """'전체 선택' 체크박스가 변경되었을 때 하위 체크박스들 동기화"""
-    val = st.session_state.get(all_key, False)
-    for k in sub_keys:
-        st.session_state[k] = val
-    #  전체선택 클릭 직후, 자동 동기화 로직 일시 차단용 플래그
-    st.session_state[clicked_flag_key] = True
-
 # 사이드바 함수
 def sidebar(df):
     st.sidebar.header("검색 조건")
-
-    # 카테고리
     st.sidebar.subheader("카테고리")
 
     selected_sub_cat = []
 
-    for main_cat in df["main_category"].dropna().unique():
+    for main_cat in sorted(df["main_category"].dropna().unique()):
         if not str(main_cat).strip():
             continue
 
         with st.sidebar.expander(str(main_cat), expanded=False):
-            sub_cats = (
-                df[df["main_category"] == main_cat]["sub_category"]
-                .dropna()
-                .unique()
-                .tolist()
-            )
-            all_key = f"all_{main_cat}"
-            clicked_flag_key = f"{all_key}__clicked"
+            main_df = df[df["main_category"] == main_cat]
+            middle_cats = [m for m in main_df["middle_category"].dropna().unique().tolist() if str(m).strip()]
 
-            # 하위 카테고리 체크박스 key 생성 및 초기 상태 보장
-            sub_keys = [f"sub_{main_cat}_{sub}" for sub in sub_cats]
-            for k in sub_keys:
-                st.session_state.setdefault(k, False)
+            main_all_key = f"all_main_{main_cat}"
+            main_sub_keys = []
 
-            # 모든 sub가 선택되었는지 여부 계산 (전체선택 표시용)
-            all_selected = all(st.session_state.get(k, False) for k in sub_keys) if sub_keys else False
+            # 중간 카테고리x
+            if not middle_cats:
+                sub_cats = sorted(main_df["sub_category"].dropna().unique())
 
-            # sub 선택 상태를 기준으로 전체선택 체크 상태 자동 동기화 
-            if not st.session_state.get(clicked_flag_key, False):
-                st.session_state[all_key] = all_selected
+                for sub in sub_cats:
+                    key = f"sub_{main_cat}_{sub}"
+                    main_sub_keys.append(key)
 
-            # 전체 선택 체크박스 (클릭했을 때만 sub들을 일괄 변경)
+                    if st.checkbox(sub, key=key):
+                        selected_sub_cat.append(sub)
+
+            # 중간 카테고리o
+            else:
+                for middle in sorted(middle_cats):
+                    with st.expander(middle, expanded=False):
+                        sub_df = main_df[main_df["middle_category"] == middle]
+                        sub_cats = sorted(sub_df["sub_category"].dropna().unique())
+
+                        middle_all_key = f"all_middle_{main_cat}_{middle}"
+                        middle_sub_keys = []
+
+                        # 중간 전체 선택
+                        def toggle_middle_all(keys, all_key):
+                            val = st.session_state.get(all_key, False)
+                            for k in keys:
+                                st.session_state[k] = val
+
+                        st.checkbox(
+                            "전체 선택",
+                            key=middle_all_key,
+                            on_change=toggle_middle_all,
+                            args=(middle_sub_keys, middle_all_key)
+                        )
+
+                        # 서브 체크박스
+                        for sub in sub_cats:
+                            key = f"sub_{main_cat}_{middle}_{sub}"
+                            middle_sub_keys.append(key)
+                            main_sub_keys.append(key)
+
+                            if st.checkbox(sub, key=key):
+                                selected_sub_cat.append(sub)
+                        
+            # 메인 전체 선택
+            def toggle_main_all(keys, all_key):
+                val = st.session_state.get(all_key, False)
+                for k in keys:
+                    st.session_state[k] = val
+
             st.checkbox(
                 "전체 선택",
-                key=all_key,
-                on_change=_toggle_all_subcats,
-                args=(all_key, sub_keys, clicked_flag_key),
+                key=main_all_key,
+                on_change=toggle_main_all,
+                args=(main_sub_keys, main_all_key)
             )
-
-            # 개별 sub 체크박스 (사용자 선택 상태 그대로 유지)
-            for sub, sub_key in zip(sub_cats, sub_keys):
-                checked = st.checkbox(str(sub), key=sub_key)
-                if checked:
-                    selected_sub_cat.append(sub)
-
-            # 클릭 플래그 리셋 (다음부터 자동 동기화 재개)
-            if st.session_state.get(clicked_flag_key, False):
-                st.session_state[clicked_flag_key] = False
 
     st.sidebar.caption(f"선택된 카테고리: {len(selected_sub_cat)}개")
 
     # 피부 타입
     st.sidebar.subheader("피부 타입")
 
+    # 표시 순서
+    skin_order = [
+        "건성",
+        "지성",
+        "복합성",
+        "민감성",
+        "미분류",
+        "복합/혼합(건성,민감성)",
+        "복합/혼합(건성,민감성,지성)",
+        "복합/혼합(민감성,지성)",
+        "복합/혼합(민감성,복합성)",
+    ]
+
+    available_skins = df["skin_type"].dropna().unique().tolist()
+    ordered_skins = [s for s in skin_order if s in available_skins]
+
     selected_skin = []
-    for skin in df["skin_type"].dropna().unique():
-        if st.sidebar.checkbox(str(skin), key=f"skin_{skin}"):
+    for skin in ordered_skins:
+        if st.sidebar.checkbox(skin, key=f"skin_{skin}"):
             selected_skin.append(skin)
 
     # 평점 슬라이더
     st.sidebar.subheader("평점")
     min_rating, max_rating = st.sidebar.slider(
-        "평점 범위",
-        # 최소 평점
+        "",
         min_value=0.0,
-        # 최대 평점
         max_value=5.0,
-        # 초기 선택 값
         value=(0.0, 5.0),
         step=0.1
     )
@@ -87,36 +113,14 @@ def sidebar(df):
     # 가격 슬라이더
     st.sidebar.subheader("가격")
 
-    # 가격
     df_min = int(df["price"].min())
     df_max = int(df["price"].max())
 
-    # 가격 입력받기
-    col1, col2 = st.sidebar.columns(2)
-
-    with col1:
-        input_min_price = st.number_input(
-            "최소 가격",
-            min_value=df_min,
-            max_value=df_max,
-            value=df_min,
-            step=1000
-        )
-
-    with col2:
-        input_max_price = st.number_input(
-            "최대 가격",
-            min_value=input_min_price,
-            max_value=df_max,
-            value=df_max,
-            step=1000
-        )
-
     min_price, max_price = st.sidebar.slider(
-        "가격 범위",
+        "",
         min_value=df_min,
         max_value=df_max,
-        value=(max(df_min, input_min_price), min(df_max, input_max_price)),
+        value=(df_min, df_max),
         step=1000
     )
 
@@ -128,20 +132,29 @@ def product_filter(df, search_text, selected_sub_cat, selected_skin, min_rating,
 
     # 검색어 조건
     if search_text:
-        filtered_df = filtered_df[filtered_df["product"].str.contains(search_text, case=False, na=False)]
+        filtered_df = filtered_df[
+            filtered_df["product_name"]
+            .str.contains(
+                search_text, 
+                case=False, 
+                na=False)]
 
     # 카테고리 필터
     if selected_sub_cat:
-        filtered_df = filtered_df[filtered_df["sub_category"].isin(selected_sub_cat)]
+        filtered_df = filtered_df[
+            filtered_df["sub_category"].isin(selected_sub_cat)]
 
     # 피부 타입 필터
     if selected_skin:
-        filtered_df = filtered_df[filtered_df["skin_type"].isin(selected_skin)]
+        filtered_df = filtered_df[
+            filtered_df["skin_type"].isin(selected_skin)]
 
     # 평점 필터
-    filtered_df = filtered_df[(filtered_df["score"] >= min_rating) & (filtered_df["score"] <= max_rating)]
+    filtered_df = filtered_df[
+        (filtered_df["score"] >= min_rating) & (filtered_df["score"] <= max_rating)]
 
     # 가격 필터
-    filtered_df = filtered_df[(filtered_df["price"] >= min_price) & (filtered_df["price"] <= max_price)]
+    filtered_df = filtered_df[
+        (filtered_df["price"] >= min_price) & (filtered_df["price"] <= max_price)]
 
     return filtered_df

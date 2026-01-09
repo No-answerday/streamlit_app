@@ -3,6 +3,7 @@ import pandas as pd
 import math
 import random # 임시
 import scroll
+from load_data import make_df
 from sidebar import sidebar, product_filter
 import css
 from pathlib import Path
@@ -13,57 +14,15 @@ st.set_page_config(layout="wide")
 scroll.apply_scroll_to_top_if_requested()
 
 # ===== parquet 로딩 =====
-PLACEHOLDER_IMAGE = "https://via.placeholder.com/420x420.png?text=No+Image"
+base_dir = Path(__file__).resolve().parent
+parquet_path = base_dir / "data" / "integrated_products_final.parquet"
+df = pd.read_parquet(parquet_path)
 
-@st.cache_data
-def load_parquet():
-    base_dir = Path(__file__).resolve().parent
-    parquet_path = base_dir / "data" / "integrated_products_vector.parquet"
-    df = pd.read_parquet(parquet_path)
-
-    # 기본 결측/타입 안정화
-    df["brand"] = df["brand"].fillna("")
-    df["skin_type"] = df["skin_type"].fillna("")
-    df["category_path"] = df["category_path"].fillna("")
-    df["category_normal"] = df["category_normal"].fillna("")
-    df["price"] = df["price"].fillna(0).astype(int)
-    df["total_reviews"] = df["total_reviews"].fillna(0).astype(int)
-
-    # ---- 기존 UI 호환용 컬럼 생성 (최소 변경 핵심) ----
-    # 기존 코드에서 df["product"] 기반으로 동작하므로 product_name을 매핑
-    df["product"] = df["product_name"]
-
-    # 카테고리: category_path에서 마지막 2단계 정도를 main/sub로 만들어 UI expander 구조 유지
-    def _split_cat(path: str):
-        parts = [p.strip() for p in path.split(">")]
-        parts = [p for p in parts if p]
-        if len(parts) >= 2:
-            return parts[-2], parts[-1]
-        elif len(parts) == 1:
-            return parts[0], parts[0]
-        else:
-            return "", ""
-
-    cats = df["category_path"].apply(_split_cat)
-    df["main_category"] = cats.apply(lambda x: x[0])
-    df["sub_category"] = cats.apply(lambda x: x[1])
-
-    # 이미지: 일단 placeholder 고정 (나중에 image_url 컬럼 생기면 여기만 바꾸면 됨)
-    df["image_url"] = PLACEHOLDER_IMAGE
-
-    # 더미 기반 UI에서 쓰던 컬럼들(표시 비우기)
-    df["keyword"] = ""      # 대표 키워드: 비워둠
-    df["score"] = 0.0       # 추천 점수: 임시 0.0
-    df["badge"] = ""        # BEST/추천 뱃지: 비워둠
-
-    return df
-
-
-# ===== 데이터프레임 =====
-df = load_parquet()
+# 데이터프레임
+df = make_df(df)
 
 skin_options = df["skin_type"].unique().tolist()
-product_options = df["product"].unique().tolist()
+product_options = df["product_name"].unique().tolist()
 
 # ===== 사이드바 =====
 selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price = sidebar(df)
@@ -113,12 +72,12 @@ is_initial = (not search_text and not selected_sub_cat and not selected_skin)
 
 # 제품 정보
 if selected_product:
-    product_info = df[df["product"] == selected_product].iloc[0]
+    product_info = df[df["product_name"] == selected_product].iloc[0]
     
     st.subheader("선택한 제품 정보")
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("제품명", product_info["product"])
+    col1.metric("제품명", product_info["product_name"])
     col2.metric("브랜드", product_info.get("brand", ""))
     col3.metric("피부 타입", product_info.get("skin_type", ""))
 
@@ -139,6 +98,11 @@ if is_initial:
 else:
     # 제품 필터링
     filtered_df = product_filter(df, search_text, selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price)
+
+    badge_order = {"BEST": 0, "추천": 1, "": 2}
+    filtered_df["badge_rank"] = filtered_df["badge"].map(badge_order).fillna(2)
+
+    filtered_df = filtered_df.sort_values(by=["badge_rank", "score"], ascending=[True, False])
 
     # 페이지네이션
     items_page = 6
@@ -182,7 +146,7 @@ else:
                             "선택",
                             key=f"reco_select_{st.session_state.page}_{i}",
                             on_click=select_product_from_reco,
-                            args=(row["product"],),
+                            args=(row["product_name"],),
                             use_container_width=True,  # 버튼이 컬럼 폭을 꽉 채움
                         )
 
@@ -190,8 +154,8 @@ else:
                     col_image, col_info = st.columns([3, 7])
 
                     with col_image:
-                        # placeholder 이미지
-                        st.image(row["image_url"], width="stretch")
+                        # 제품 이미지
+                        st.image(row["image_url"], width=200)
 
                     with col_info:
                         badge_html = ""
@@ -207,14 +171,15 @@ else:
                                 {badge_html}
                             </div>
                             <div style="font-size:18px;font-weight:600;margin:4px 0;">
-                                {row['product']}
+                                {row['product_name']}
                             </div>
                             <div style="font-size:15px;color:#111;font-weight:500;">
                                 ₩{int(row.get('price',0)):,}
                             </div>
                             <div style="margin-top:6px;font-size:13px;color:#555;">
-                                카테고리: {row.get('main_category','')} &gt; {row.get('sub_category','')}<br>
+                                카테고리: {row.get('category_path_norm')}<br>
                                 피부 타입: {row.get('skin_type','')}<br>
+                                평점: {row.get('score','')}<br>
                                 리뷰 수: {int(row.get('total_reviews',0)):,}
                             </div>
                             """,
