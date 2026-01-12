@@ -3,7 +3,7 @@ import pandas as pd
 import math
 import random # 임시
 import scroll
-from load_data import load_raw_df, make_df, load_reviews_map
+from load_data import load_raw_df, make_df
 from sidebar import sidebar, product_filter
 import css
 from pathlib import Path
@@ -25,19 +25,81 @@ scroll.apply_scroll_to_top_if_requested()
 
 # ===== parquet 로딩 =====
 base_dir = Path(__file__).resolve().parent
-parquet_path = base_dir / "data" / "integrated_products_final"
+PRODUCTS_BASE_DIR = base_dir / "data" / "integrated_products_final"
 
-df = load_raw_df(parquet_path)
+raw_df = load_raw_df(PRODUCTS_BASE_DIR)  
 
-# 데이터프레임
-df = make_df(df)
+df = make_df(raw_df)                      
 
 skin_options = df["skin_type"].unique().tolist()
 product_options = df["product_name"].unique().tolist()
 
-# ===== 리뷰 맵 로딩 (없으면 None) =====
-# data/reviews_map.parquet (review_id, review_text) 파일이 있을 때만 대표리뷰 텍스트 출력
-reviews_df = load_reviews_map()
+
+# ===== 리뷰 로딩: partitioned_reviews/category=XXX/review.parquet 사용 =====
+REVIEWS_BASE_DIR = base_dir / "data" / "partitioned_reviews"
+
+
+# 디버그 출력 제거
+
+def _candidate_category_dirs(sub_category: str):
+    """
+    sub_category 값과 실제 폴더명(category=...)이 불일치할 수 있어 후보를 여러 개 만들어서 탐색.
+    예) "틴트 립글로스" -> "틴트_립글로스"
+    """
+    if not sub_category:
+        return []
+
+    s = str(sub_category).strip()
+    if not s:
+        return []
+
+    cands = [s]
+
+    # 공백/슬래시/구분자 -> 언더스코어
+    s2 = s.replace(" / ", "_").replace("/", "_").replace(" ", "_").replace(">", "_").replace("|", "_")
+    cands.append(s2)
+
+    # 연속 언더스코어 정리
+    s3 = re.sub(r"_+", "_", s2).strip("_")
+    cands.append(s3)
+
+    # 이미 category= 접두가 들어오는 경우도 방어
+    out = []
+    for x in cands:
+        x = x.replace("category=", "").strip()
+        if x and x not in out:
+            out.append(x)
+    return out
+
+@st.cache_data(show_spinner=False)
+def load_reviews_by_subcategory(sub_category: str):
+    """
+    data/partitioned_reviews/category=<sub_category>/review.parquet 로드
+    - 반환: (DataFrame, found_path or None)
+    """
+    if not sub_category:
+        return pd.DataFrame(), None
+
+    for cand in _candidate_category_dirs(sub_category):
+        review_path = REVIEWS_BASE_DIR / f"category={cand}" / "review.parquet"
+        if review_path.exists():
+            rdf = pd.read_parquet(review_path)
+
+            # review_text 컬럼명 표준화 (혹시 다른 이름이면)
+            if "review_text" not in rdf.columns:
+                for col in ["full_text", "content", "text", "review", "review_content"]:
+                    if col in rdf.columns:
+                        rdf = rdf.rename(columns={col: "review_text"})
+                        break
+
+            # 최소 컬럼 체크
+            if "product_id" not in rdf.columns or "review_text" not in rdf.columns:
+                return pd.DataFrame(), str(review_path)
+
+            return rdf, str(review_path)
+
+    return pd.DataFrame(), None
+
 
 # ===== 사이드바 =====
 selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price = sidebar(df)
@@ -132,23 +194,44 @@ if selected_product:
         top_kw = ", ".join(top_kw)
     st.write(top_kw if top_kw else "-")
 
+    sub_cat = product_info.get("sub_category", "")
+
+    # 디버그 출력 제거
     # 대표 리뷰
     st.markdown("### 대표 리뷰")
-    rep_ids = product_info.get("representative_review_id", None)
-    rep_list = rep_ids_to_list(rep_ids, n=3)
 
-    if reviews_df is None:
-        st.info("대표 리뷰를 표시하려면 data/reviews_map.parquet 파일이 필요해요.")
+    # category_path_norm 마지막 토큰을 리뷰 파티션 카테고리로 사용 (폴더명 불일치 대응)
+    cat_norm = product_info.get("category_path_norm", "")
+    if isinstance(cat_norm, str) and ">" in cat_norm:
+        review_cat = cat_norm.split(">")[-1].strip()
     else:
-        mp = dict(zip(reviews_df["review_id"], reviews_df["review_text"]))
-        texts = [mp.get(rid) for rid in rep_list if rid in mp]
+        review_cat = product_info.get("sub_category", "")
 
-        if not texts:
-            st.info("대표 리뷰를 찾지 못했어요. review_id 매칭을 확인해주세요.")
+    reviews_df, found_path = load_reviews_by_subcategory(review_cat)
+
+    # 디버그 출력 제거 + 해당 카테고리 리뷰 파일이 없으면 안내 후 스킵
+    if not found_path:
+        st.info("현재 제공된 리뷰 데이터(partitioned_reviews)에 해당 카테고리 리뷰 파일이 없습니다.")
+    elif reviews_df.empty:
+        st.info("대표 리뷰를 불러올 수 없습니다.")
+    else:
+        q = reviews_df[reviews_df["product_id"] == product_info["product_id"]]
+
+        if q.empty:
+            # 데이터 범위/ID 체계 차이로 상품 단위 매칭이 안 될 수 있음
+            st.info("해당 상품의 리뷰가 없습니다. (현재 리뷰 데이터는 일부 카테고리만 제공될 수 있습니다.)")
         else:
-            for i, t in enumerate(texts, 1):
-                st.write(f"{i}. {t}")
+            # 점수 있으면 높은 순
+            if "score" in q.columns:
+                q = q.sort_values("score", ascending=False)
 
+            texts = q["review_text"].dropna().head(3).tolist()
+
+            if not texts:
+                st.info("대표 리뷰가 비어 있습니다.")
+            else:
+                for i, t in enumerate(texts, 1):
+                    st.write(f"{i}. {t}")
 # ===== 추천 페이지 =====
 st.subheader("추천 상품")
 
@@ -282,5 +365,3 @@ else:
         )
 
 css.set_css()
-
-# st.caption(f"top_keywords non-empty: {(df['top_keywords'].astype(str).str.len() > 0).mean():.2%}")
