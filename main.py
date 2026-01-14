@@ -1,15 +1,16 @@
 import streamlit as st
+import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 import math
-import scroll
-from load_data import load_raw_df, make_df, load_reviews
-from sidebar import sidebar, product_filter
 import css
-from pathlib import Path
 import sys
 import os
 import re
+import scroll
+from load_data import load_raw_df, make_df, load_reviews, load_date_score, rating_trend
+from sidebar import sidebar, product_filter
+from pathlib import Path
 
 st.cache_data.clear()
 
@@ -133,6 +134,52 @@ if selected_product:
         st.info("대표 리뷰가 없습니다.")
     else:
         st.text(text)
+
+    # 평점 추이 그래프
+    if selected_product:
+        product_info = df[df["product_name"] == selected_product].iloc[0]
+        product_id = product_info["product_id"]
+        category = product_info["category"]
+        
+        review_df = load_date_score(product_id, category, REVIEWS_BASE_DIR)
+        trend_df = rating_trend(review_df)
+
+    st.markdown("### 주간 평점 추이")
+
+    if trend_df.empty:
+        st.info("평점 데이터가 없습니다.")
+    else:
+        fig = go.Figure()
+
+        # 주간 평균
+        fig.add_trace(go.Scatter(
+            x=trend_df["week"], 
+            y=trend_df["avg_score"], 
+            mode="lines", 
+            name="주간 평균", 
+            line=dict(color="slateblue", width=2, dash="dot"), 
+            opacity=0.4
+            ))
+        
+        # 이동 평균
+        fig.add_trace(go.Scatter(
+            x=trend_df["week"], 
+            y=trend_df["ma4"], 
+            mode="lines", 
+            name="추세 (4주 이동평균)", 
+            line=dict(color="royalblue", width=3)
+            ))
+        
+        fig.update_layout(
+            yaxis=dict(range=[1, 5]),
+            xaxis_title="날짜",
+            yaxis_title="평균 평점",
+            hovermode="x unified",
+            template="plotly_white",
+            height=350
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
 
 # ===== 추천 페이지 =====
 st.subheader("추천 상품")

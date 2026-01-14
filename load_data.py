@@ -54,6 +54,39 @@ def load_reviews(product_id: str, review_id: str, category: str, base_dir: Path)
     else:
         return pre_text
     
+# 리뷰 작성일, 평점 데이터 로드
+@st.cache_data
+def load_date_score(product_id: str, category: str, base_dir: Path) -> str:
+    category = category.replace("/", "_")
+    review_path = base_dir / f"category={category}" / "data.parquet"
+
+    if not review_path.exists():
+        return pd.DataFrame()
+    
+    df = pd.read_parquet(review_path, columns=["product_id", "date", "score"])
+    df = df[df["product_id"] == product_id]
+    df["date"] = pd.to_datetime(df["date"])
+
+    return df
+
+# 주간 평점, 이동평균 계산
+def rating_trend(review_df: pd.DataFrame) -> pd.DataFrame:
+    if review_df.empty:
+        return review_df
+    
+    df = review_df.copy()
+
+    # 주간 기준 월요일
+    df["week"] = df["date"].dt.to_period("W").dt.start_time
+    
+    trend_df = (df.groupby("week", as_index=False).agg(avg_score=("score", "mean"), review_count=("score", "count")).sort_values("week"))
+    trend_df["avg_score"] = trend_df["avg_score"].round(2)
+
+    # 1개월 이동평균
+    trend_df["ma4"] = (trend_df["avg_score"].rolling(window=4, min_periods=1).mean().round(2))
+
+    return trend_df
+    
     
 def make_df(df: pd.DataFrame) -> pd.DataFrame:
     rating_df = df.groupby("product_id", as_index=False).agg({
