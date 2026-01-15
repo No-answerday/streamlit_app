@@ -42,6 +42,7 @@ selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price = 
 
 # ===== 메인 =====
 st.title("화장품 추천 대시보드")
+st.markdown("---")
 st.subheader("제품명 검색")
 
 search_keyword = st.session_state.get("search_keyword", "")
@@ -110,8 +111,8 @@ if selected_product:
     if product_info.get("product_url"):
         st.link_button("상품 페이지", product_info["product_url"])
 
-    # 대표 긍정 키워드
-    st.markdown("### 대표 긍정 키워드")
+    # 대표 키워드
+    st.markdown("### 대표 키워드")
     top_kw = product_info.get("top_keywords", "")
     if isinstance(top_kw, (list, np.ndarray)):
         top_kw = ", ".join(map(str, top_kw))
@@ -142,31 +143,66 @@ if selected_product:
         category = product_info["category"]
         
         review_df = load_date_score(product_id, category, REVIEWS_BASE_DIR)
-        trend_df = rating_trend(review_df)
 
-    st.markdown("### 주간 평점 추이")
+    st.markdown("### 평점 추이")
+    col_left, col_right, col_empty = st.columns([1, 1, 1])
 
-    if trend_df.empty:
-        st.info("평점 데이터가 없습니다.")
+    # 집계 기준
+    with col_left:
+        freq_label = st.selectbox("평균 기준", ["일간", "주간", "월간"], index=1)
+
+    freq_map = {"일간": ("D", 7), "주간": ("W", 4), "월간": ("M", 3)}
+    freq, ma_window = freq_map[freq_label]
+
+    with col_right:
+        min_date = review_df["date"].min().date()
+        max_date = review_df["date"].max().date()
+        
+        date_range = st.date_input("기간 선택", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+
+    trend_df = pd.DataFrame()
+    is_date_range_ready = False
+
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        is_date_range_ready = True
+        start_date, end_date = date_range
+        start_date = pd.to_datetime(start_date)
+        end_date = pd.to_datetime(end_date)
+
+        date_df = review_df.loc[(review_df["date"] >= start_date) & (review_df["date"] <= end_date)]
+
+        if not date_df.empty:
+            trend_df = rating_trend(date_df, freq=freq, ma_window=ma_window)
+
+    else:
+        st.info("마지막 날짜를 선택해주세요.")
+        date_df = pd.DataFrame()    # 그래프 비활성화
+
+    if not is_date_range_ready:
+        pass
+
+    elif trend_df.empty:
+        st.info("선택한 기간에 대한 평점 데이터가 없습니다.")
+
     else:
         fig = go.Figure()
 
         # 주간 평균
         fig.add_trace(go.Scatter(
-            x=trend_df["week"], 
+            x=trend_df["date"], 
             y=trend_df["avg_score"], 
             mode="lines", 
-            name="주간 평균", 
+            name=f"{freq_label} 평균", 
             line=dict(color="slateblue", width=2, dash="dot"), 
             opacity=0.4
             ))
         
         # 이동 평균
         fig.add_trace(go.Scatter(
-            x=trend_df["week"], 
-            y=trend_df["ma4"], 
+            x=trend_df["date"], 
+            y=trend_df["ma"], 
             mode="lines", 
-            name="추세 (4주 이동평균)", 
+            name=f"추세 ({ma_window}개{freq_label} 이동평균)", 
             line=dict(color="royalblue", width=3)
             ))
         

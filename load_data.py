@@ -69,21 +69,17 @@ def load_date_score(product_id: str, category: str, base_dir: Path) -> str:
 
     return df
 
-# 주간 평점, 이동평균 계산
-def rating_trend(review_df: pd.DataFrame) -> pd.DataFrame:
+# 기간별 평점, 이동평균 계산
+def rating_trend(review_df: pd.DataFrame, freq: str = "W", ma_window: int = 4) -> pd.DataFrame:
     if review_df.empty:
         return review_df
     
     df = review_df.copy()
-
-    # 주간 기준 월요일
-    df["week"] = df["date"].dt.to_period("W").dt.start_time
+    df = df.set_index("date").sort_index()
     
-    trend_df = (df.groupby("week", as_index=False).agg(avg_score=("score", "mean"), review_count=("score", "count")).sort_values("week"))
+    trend_df = (df.resample(freq).agg(avg_score=("score", "mean"), review_count=("score", "count")).reset_index())
     trend_df["avg_score"] = trend_df["avg_score"].round(2)
-
-    # 1개월 이동평균
-    trend_df["ma4"] = (trend_df["avg_score"].rolling(window=4, min_periods=1).mean().round(2))
+    trend_df["ma"] = (trend_df["avg_score"].rolling(window=ma_window, min_periods=1).mean().round(2))
 
     return trend_df
     
