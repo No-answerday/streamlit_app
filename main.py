@@ -243,18 +243,21 @@ if selected_product:
     with col_mid:
         date_range = st.date_input(
             "기간 선택",
-            key=DATE_RANGE_KEY,
+            value=st.session_state[DATE_RANGE_KEY],
             min_value=min_date,
             max_value=max_date,
+            key=DATE_RANGE_KEY,
+            on_change=_skip_scroll_apply_once,  # 그래프 조작 시 스크롤 apply 1회 스킵
         )
+
+    def reset_date_range():
+        _skip_scroll_apply_once()  # reset 클릭도 그래프 조작으로 간주
+        st.session_state[DATE_RANGE_KEY] = (min_date, max_date)
+        # 필요하면 즉시 반영용 rerun
+        st.rerun()
 
     with col_right:
         st.markdown("<br>", unsafe_allow_html=True)
-
-        def reset_date_range(, on_click=_skip_scroll_apply_once):
-            st.session_state[DATE_RANGE_KEY] = (min_date, max_date)
-            st.rerun()
-
         st.button("↺", key="reset_date", help="날짜 초기화", on_click=reset_date_range)
 
 
