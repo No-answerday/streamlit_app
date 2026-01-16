@@ -207,6 +207,9 @@ if selected_product:
         category = product_info["category"]
         
         review_df = load_date_score(product_id, category, REVIEWS_BASE_DIR)
+        min_date = review_df["date"].min().date()
+        max_date = review_df["date"].max().date()
+
 
     st.markdown("### 📈 평점 추이")
     col_left, col_mid, col_right, col_empty = st.columns([1, 1, 1, 1])
@@ -218,18 +221,29 @@ if selected_product:
     freq_map = {"일간": ("D", 7), "주간": ("W", 4), "월간": ("M", 3)}
     freq, ma_window = freq_map[freq_label]
 
-    with col_mid:
-        min_date = review_df["date"].min().date()
-        max_date = review_df["date"].max().date()
-        
-        date_range = st.date_input("기간 선택", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-
     DATE_RANGE_KEY = "rating_date_range"
+
+    # 최초 1회 기본값 세팅
+    if DATE_RANGE_KEY not in st.session_state:
+        st.session_state[DATE_RANGE_KEY] = (min_date, max_date)
+
+    with col_mid:
+        date_range = st.date_input(
+            "기간 선택",
+            key=DATE_RANGE_KEY,
+            min_value=min_date,
+            max_value=max_date,
+        )
 
     with col_right:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("↺", key="reset_date", help="날짜 초기화"):
+
+        def reset_date_range():
             st.session_state[DATE_RANGE_KEY] = (min_date, max_date)
+            st.rerun()
+
+        st.button("↺", key="reset_date", help="날짜 초기화", on_click=reset_date_range)
+
 
     trend_df = pd.DataFrame()
     is_date_range_ready = False
@@ -247,7 +261,7 @@ if selected_product:
 
     else:
         st.info("마지막 날짜를 선택해주세요.📆")
-        date_df = pd.DataFrame()    # 그래프 비활성화
+        date_df = pd.DataFrame()
 
     if not is_date_range_ready:
         pass
