@@ -10,6 +10,7 @@ import re
 import scroll
 from load_data import load_raw_df, make_df, load_reviews, load_date_score, rating_trend
 from sidebar import sidebar, product_filter
+from recommend_similar_products import recommend_similar_products, print_recommendations
 from pathlib import Path
 
 st.cache_data.clear()
@@ -43,8 +44,8 @@ def safe_scroll_to_top():
 
 # ===== parquet 로딩 =====
 base_dir = Path(__file__).resolve().parent
-PRODUCTS_BASE_DIR = base_dir / "data" / "integrated_products_final"
-REVIEWS_BASE_DIR = base_dir / "data" / "partitioned_reviews"
+PRODUCTS_BASE_DIR = base_dir / "data" / "processed_data" / "integrated_products_final"
+REVIEWS_BASE_DIR = base_dir / "data" / "processed_data" / "partitioned_reviews"
 
 product_df = load_raw_df(PRODUCTS_BASE_DIR)
 df = make_df(product_df)
@@ -201,7 +202,7 @@ if selected_product:
     if selected_product:
         product_info = df[df["product_name"] == selected_product].iloc[0]
         product_id = product_info["product_id"]
-        review_id = product_info["representative_review_id"]
+        review_id = product_info["representative_review_id_roberta"]
         category = product_info["category"]
         
         text = load_reviews(product_id, review_id, category, REVIEWS_BASE_DIR)
@@ -284,13 +285,12 @@ if selected_product:
     else:
         fig = go.Figure()
 
-        # 주간 평균
-        fig.add_trace(go.Scatter(
+        # 기간별 평균
+        fig.add_trace(go.Bar(
             x=trend_df["date"], 
             y=trend_df["avg_score"], 
-            mode="lines", 
             name=f"{freq_label} 평균", 
-            line=dict(color="slateblue", width=2, dash="dot"), 
+            marker_color="slateblue", 
             opacity=0.4
             ))
         
@@ -327,14 +327,68 @@ else:
     # 제품 필터링
     filtered_df = product_filter(df, search_text, selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price)
 
-    # 추천 목록에서 선택 상품 제외
-    if selected_product:
-        filtered_df = filtered_df[filtered_df["product_name"] != selected_product]
+    page_df = pd.DataFrame()
+    reco_df_view = pd.DataFrame()
+    search_df_view = filtered_df.copy()
+
+    # 유사도 / 추천점수 기본값
+    search_df_view["reco_score"] = 0.0
+    search_df_view["similarity"] = 0.0
 
     badge_order = {"BEST": 0, "추천": 1, "": 2}
-    filtered_df["badge_rank"] = filtered_df["badge"].map(badge_order).fillna(2)
+    search_df_view["badge_rank"] = (
+    search_df_view["badge"].map(badge_order).fillna(2)
+    )
 
-    filtered_df = filtered_df.sort_values(by=["badge_rank", "score", "total_reviews"], ascending=[True, False, False])
+    # 벡터 기반 추천 점수
+    if selected_product:
+        target_product = df[df["product_name"] == selected_product]
+
+        if not target_product.empty:
+            target_product_id = target_product.iloc[0]["product_id"]
+
+            reco_results = recommend_similar_products(
+                product_id=target_product_id,
+                categories=None,
+                top_n=100
+            )
+
+            reco_list = []
+            for _, items in reco_results.items():
+                reco_list.extend(items)
+
+            if reco_list:
+                tmp_reco_df = pd.DataFrame(reco_list)
+
+                tmp_reco_df = tmp_reco_df.rename(columns={
+                    "recommend_score": "reco_score",
+                    "cosine_similarity": "similarity"
+                })
+
+                merged_df = df.merge(
+                    tmp_reco_df[["product_id", "reco_score", "similarity"]],
+                    on="product_id",
+                    how="left"
+                )
+
+                merged_df["reco_score"] = merged_df["reco_score"].fillna(0)
+                merged_df["similarity"] = merged_df["similarity"].fillna(0)
+
+                merged_df = merged_df[merged_df["product_id"] != target_product_id]
+
+                search_df_view = merged_df.copy()
+
+                reco_df_view = (
+                    merged_df
+                    .query("reco_score > 0")
+                    .query("product_id != @target_product_id")
+                    .sort_values(
+                        by=["reco_score", "similarity"],
+                        ascending=[False, False]
+                    )
+                    .head(6)
+                )
+
 
     # 페이지네이션
     items_page = 6
@@ -355,96 +409,163 @@ else:
         st.session_state.prev_filter = cur_filter
         safe_scroll_to_top()
 
+    search_df_view = search_df_view.sort_values(
+    by=["score", "total_reviews"],
+    ascending=[False, False]
+    )
+
     # 데이터 슬라이싱
     start = (st.session_state.page - 1) * items_page
     end = start + items_page
-    page_df = filtered_df.iloc[start:end]
-
-    # 추천 상품 출력
-    if page_df.empty:
-        st.warning("표시할 상품이 없어요.🥺")
+    if not selected_product:
+        page_df = search_df_view.iloc[start:end]
     else:
-        rows = page_df.reset_index(drop=True)
+        page_df = pd.DataFrame()
 
-        for i in range(0, len(rows), 2):
-            cols = st.columns(2)
 
-            for j in range(2):  # 한 줄에 2개씩 출력
+
+# 상품 출력
+if (not is_initial) and (not selected_product) and page_df.empty:
+    st.warning("표시할 상품이 없어요.🥺")
+elif (not is_initial) and (not selected_product) and (not page_df.empty):
+    rows = page_df.reset_index(drop=True)
+
+    for i in range(0, len(rows), 2):
+        cols = st.columns(2)
+
+        for j in range(2):  # 한 줄에 2개씩 출력
+            if i + j < len(rows):
+                row = rows.iloc[i + j]
+
+                with cols[j]:
+                    with st.container(border=True):
+                        col_image, col_info = st.columns([3, 7])
+                        
+                        with col_image:
+                            st.image(row["image_url"], width=200)
+
+                        with col_info:
+                            badge_html = ""
+                            if row.get("badge") == "BEST":
+                                badge_html = "<span style='background:#ffea00;padding:2px 8px;border-radius:8px;font-size:12px;margin-left:8px;'>BEST</span>"
+                            elif row.get("badge") == "추천":
+                                badge_html = "<span style='background:#d1f0ff;padding:2px 8px;border-radius:8px;font-size:12px;margin-left:8px;'>추천</span>"
+
+                            st.markdown(
+                                f"""
+                                <div style="font-size:14px;color:#888;">
+                                {row.get('brand','')}
+                                {badge_html}
+                                </div>
+
+                                <div style="font-size:18px;font-weight:600;margin:4px 0;">
+                                {row['product_name']}
+                                </div>
+
+                                <div style="font-size:15px;color:#111;font-weight:500;">
+                                ₩{int(row.get('price',0)):,}
+                                </div>
+                                
+                                <div style="margin-top:6px;font-size:13px;color:#555;">
+                                🏷️ 카테고리: {row.get('category_path_norm')}<br>
+                                😊 피부 타입: {row.get('skin_type','')}<br>
+                                ⭐ 평점: {row.get('score','')}<br>
+                                💬 리뷰 수: {int(row.get('total_reviews',0)):,}
+                                </div>
+                                """, unsafe_allow_html=True,
+                            )
+
+                            empty_col, btn_col = st.columns([8, 2], vertical_alignment="center")
+            
+                            with btn_col:
+                                st.button(
+                                    "선택",
+                                    key=f"reco_select_{st.session_state.page}_{i+j}",
+                                    on_click=select_product_from_reco,
+                                    args=(row["product_name"],),
+                                    use_container_width=True,
+                                )
+
+
+# ===== 3. 추천 상품 출력 =====
+if selected_product:
+    if reco_df_view.empty:
+        st.info("추천 가능한 유사 상품이 없어요.😥")
+    else:
+        rows = reco_df_view.reset_index(drop=True)
+
+        for i in range(0, len(rows), 3):
+            cols = st.columns(3)
+
+            for j in range(3):
                 if i + j < len(rows):
                     row = rows.iloc[i + j]
 
                     with cols[j]:
                         with st.container(border=True):
                             col_image, col_info = st.columns([3, 7])
-                            
+
                             with col_image:
-                                st.image(row["image_url"], width=200)
+                                if row.get("image_url"):
+                                    st.image(row["image_url"], width=180)
 
                             with col_info:
-                                badge_html = ""
-                                if row.get("badge") == "BEST":
-                                    badge_html = "<span style='background:#ffea00;padding:2px 8px;border-radius:8px;font-size:12px;margin-left:8px;'>BEST</span>"
-                                elif row.get("badge") == "추천":
-                                    badge_html = "<span style='background:#d1f0ff;padding:2px 8px;border-radius:8px;font-size:12px;margin-left:8px;'>추천</span>"
-
                                 st.markdown(
                                     f"""
                                     <div style="font-size:14px;color:#888;">
                                     {row.get('brand','')}
-                                    {badge_html}
                                     </div>
 
-                                    <div style="font-size:18px;font-weight:600;margin:4px 0;">
+                                    <div style="font-size:18px;font-weight:600;">
                                     {row['product_name']}
                                     </div>
 
-                                    <div style="font-size:15px;color:#111;font-weight:500;">
+                                    <div style="font-size:15px;font-weight:500;">
                                     ₩{int(row.get('price',0)):,}
                                     </div>
-                                    
+
                                     <div style="margin-top:6px;font-size:13px;color:#555;">
-                                    🏷️ 카테고리: {row.get('category_path_norm')}<br>
-                                    😊 피부 타입: {row.get('skin_type','')}<br>
-                                    ⭐ 평점: {row.get('score','')}<br>
-                                    💬 리뷰 수: {int(row.get('total_reviews',0)):,}
+                                    🔗 유사도: {row['similarity']:.3f}<br>
+                                    ⭐ 추천 점수: {row['reco_score']:.3f}
                                     </div>
-                                    """, unsafe_allow_html=True,
+                                    """,
+                                    unsafe_allow_html=True,
                                 )
 
-                                empty_col, btn_col = st.columns([8, 2], vertical_alignment="center")
-                
-                                with btn_col:
-                                    st.button(
-                                        "선택",
-                                        key=f"reco_select_{st.session_state.page}_{i+j}",
-                                        on_click=select_product_from_reco,
-                                        args=(row["product_name"],),
-                                        use_container_width=True,
-                                    )
+                                st.button(
+                                    "선택",
+                                    key=f"reco_only_{row['product_id']}",
+                                    on_click=select_product_from_reco,
+                                    args=(row["product_name"],),
+                                    use_container_width=True,
+                                )
 
-    # 페이지 이동 버튼
+
+show_pagination = (
+    selected_product
+    or selected_sub_cat
+)
+
+# 페이지 이동 버튼
+if show_pagination and total_pages > 1:
     st.markdown("---")
 
     col_prev, col_info, col_next = st.columns([1, 2, 1])
 
-    # 이전 페이지 이동 콜백 함수
     def go_prev():
         if st.session_state.page > 1:
             st.session_state.page -= 1
             safe_scroll_to_top()
 
-    # 다음 페이지 이동 콜백 함수
     def go_next():
         if st.session_state.page < total_pages:
             st.session_state.page += 1
             safe_scroll_to_top()
 
     with col_prev:
-        # on_click 콜백 방식으로 변경
         st.button("이전", key="prev_page", on_click=go_prev)
 
     with col_next:
-        # on_click 콜백 방식으로 변경
         st.button("다음", key="next_page", on_click=go_next)
 
     with col_info:
