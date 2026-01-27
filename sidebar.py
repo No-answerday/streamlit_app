@@ -142,12 +142,7 @@ def product_filter(df, search_text, selected_sub_cat, selected_skin, min_rating,
     # 검색어 조건
     if search_text:
         safe_text = re.escape(search_text)  # 정규식 이스케이프
-        filtered_df = filtered_df[
-            filtered_df["product_name"]
-            .str.contains(
-                safe_text, 
-                case=False, 
-                na=False)]
+        filtered_df = filtered_df[filtered_df["product_name"].str.contains(safe_text, case=False, na=False) | filtered_df["brand"].str.contains(safe_text, case=False, na=False) | filtered_df["top_keywords"].str.contains(safe_text, case=False, na=False)]
 
     # 카테고리 필터
     if selected_sub_cat:

@@ -50,6 +50,9 @@ REVIEWS_BASE_DIR = base_dir / "data" / "processed_data" / "partitioned_reviews"
 product_df = load_raw_df(PRODUCTS_BASE_DIR)
 df = make_df(product_df)
 
+# 키워드 문자열 컬럼 생성
+df["top_keywords_str"] = df["top_keywords"].apply(lambda x: " ".join(x) if isinstance(x, (list, np.ndarray)) else str(x))
+
 skin_options = df["skin_type"].unique().tolist()
 product_options = df["product_name"].unique().tolist()
 
@@ -63,9 +66,9 @@ st.markdown("---")
 search_keyword = st.session_state.get("search_keyword", "")
 
 
-def on_search_change():
-    if "product_search" in st.session_state:
-        st.session_state["search_keyword"] = st.session_state["product_search"]
+# def on_search_change():
+#     if "product_search" in st.session_state:
+#         st.session_state["search_keyword"] = st.session_state["product_search"]
 
 
 # 제품 선택 해제 버튼
@@ -78,20 +81,28 @@ def clear_selected_product():
 
 # selectbox 컨테이너 안으로 이동
 with st.container(border=True):
-    col_sel, col_clear = st.columns([10, 1], vertical_alignment="bottom")
+    col_text, col_sel, col_clear = st.columns([5, 5, 1], vertical_alignment="bottom")
+
+    with col_text:
+        st.text_input(
+            "🗝️키워드 검색",
+            placeholder="예: 수분, 촉촉, 진정",
+            key="search_keyword"
+        )
 
     with col_sel:
         selected_product = st.selectbox(
-            "🔎 제품명을 입력하거나 선택하세요",
+            "🔎 제품명 검색",
             options=[""] + product_options,
             index=0,
             key="product_search",
-            on_change=on_search_change,  # 제품 선택 시 검색 상태 동기화
+            # on_change=on_search_change,  # 제품 선택 시 검색 상태 동기화
         )
 
     with col_clear:
         # 클릭 시 선택 제품 초기화
-        st.button("✕", key="clear_product", help="선택 해제", on_click=clear_selected_product)
+        st.button("✕", help="검색 초기화", 
+                  on_click=lambda: (st.session_state.update({"product_search":"", "search_keyword":""}), safe_scroll_to_top()))
 
 
 # 추천 상품 클릭
@@ -102,7 +113,11 @@ def select_product_from_reco(product_name: str):
 
 
 # 검색어로 사용할 값
-search_text = selected_product if selected_product else ""
+# search_text = selected_product if selected_product else ""
+if st.session_state.product_search:
+    search_text = st.session_state.product_search
+else:
+    search_text = st.session_state.search_keyword.strip()
 
 # 초기 상태 여부
 is_initial = (not search_text and not selected_sub_cat and not selected_skin)
