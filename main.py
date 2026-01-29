@@ -8,6 +8,7 @@ import sys
 import os
 import re
 import scroll
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from load_data import (
     make_df,
@@ -428,143 +429,229 @@ if selected_product:
         product_id = product_info.get("product_id", "")
         review_id = product_info.get("representative_review_id_roberta", None)
 
-        # ✅ 대표 리뷰는 ID로 직접 가져오기 (모든 리뷰 로드 불필요)
-        st.markdown("### ✒️ 대표 리뷰")
-        if product_id and pd.notna(review_id):
-            with st.spinner("대표 리뷰 로딩 중..."):
+        st.markdown("---")
+
+        # ---------------------------------------------------------
+        # 🚀 [핵심] 1. 화면에 미리 자리(Placeholders) 만들기
+        # ---------------------------------------------------------
+        container_review = st.empty()  # 대표 리뷰 자리
+        container_trend = st.empty()  # 평점 추이 자리
+
+        # 초기 로딩 메시지 표시
+        with container_review.container():
+            st.markdown("### ✒️ 대표 리뷰")
+            st.info("✒️ 대표 리뷰를 분석 중입니다...")
+
+        with container_trend.container():
+            st.markdown("### 📈 평점 추이")
+            st.info("📈 평점 데이터를 불러오는 중입니다...")
+
+        # ---------------------------------------------------------
+        # 🚀 2. 비동기 작업 시작 - 먼저 끝나는 순서대로 처리
+        # ---------------------------------------------------------
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_type = {}
+
+            # 1. 대표 리뷰 요청
+            if product_id and pd.notna(review_id):
+                f_rep = executor.submit(
+                    fetch_representative_review_text, str(product_id), int(review_id)
+                )
+                future_to_type[f_rep] = "REVIEW"
+
+            # 2. 평점 추이 데이터 요청
+            if product_id:
+                f_trend = executor.submit(load_reviews_athena, str(product_id))
+                future_to_type[f_trend] = "TREND"
+
+            # 3. 추천 상품 요청 (캐시 체크)
+            if product_id and st.session_state["reco_target_product_id"] != product_id:
+                f_reco = executor.submit(
+                    recommend_similar_products,
+                    product_id=product_id,
+                    categories=None,
+                    top_n=100,
+                )
+                future_to_type[f_reco] = "RECO"
+
+            # 3. [핵심] 먼저 끝나는 순서대로 결과 가공 및 출력
+            for future in as_completed(future_to_type):
+                task_type = future_to_type[future]
+
                 try:
-                    rep_df = fetch_representative_review_text(
-                        str(product_id), int(review_id)
-                    )
-                    if not rep_df.empty and "full_text" in rep_df.columns:
-                        text = rep_df.iloc[0]["full_text"]
-                        if text:
-                            st.text(text)
-                        else:
-                            st.info("대표 리뷰가 없습니다.")
-                    else:
-                        st.info("대표 리뷰가 없습니다.")
+                    result = future.result()
+
+                    if task_type == "REVIEW":
+                        with container_review.container():
+                            st.markdown("### ✒️ 대표 리뷰")
+                            if not result.empty and "full_text" in result.columns:
+                                text = result.iloc[0]["full_text"]
+                                if text:
+                                    st.text(text)
+                                else:
+                                    st.info("대표 리뷰가 없습니다.")
+                            else:
+                                st.info("대표 리뷰가 없습니다.")
+
+                    elif task_type == "TREND":
+                        # 평점 추이는 reviews_df를 저장해서 나중에 사용
+                        st.session_state["_reviews_df_cache"] = result
+
+                        with container_trend.container():
+                            st.markdown("### 📈 평점 추이")
+                            if (
+                                result.empty
+                                or "date" not in result.columns
+                                or "score" not in result.columns
+                            ):
+                                st.info("평점 추이를 그릴 리뷰 데이터가 없습니다.")
+                            else:
+                                review_df = result[["date", "score"]].copy()
+                                review_df["date"] = pd.to_datetime(
+                                    review_df["date"], errors="coerce"
+                                )
+                                review_df["score"] = pd.to_numeric(
+                                    review_df["score"], errors="coerce"
+                                )
+                                review_df = review_df.dropna(
+                                    subset=["date", "score"]
+                                ).sort_values("date")
+
+                                if review_df.empty:
+                                    st.info(
+                                        "평점 추이를 그릴 수 있는 날짜/평점 데이터가 없습니다."
+                                    )
+                                else:
+                                    min_date = review_df["date"].min().date()
+                                    max_date = review_df["date"].max().date()
+
+                                    col_left, col_mid, col_right, _ = st.columns(
+                                        [1, 1, 1, 1]
+                                    )
+                                    with col_left:
+                                        freq_label = st.selectbox(
+                                            "평균 기준",
+                                            ["일간", "주간", "월간"],
+                                            index=2,
+                                            key="rating_freq_label",
+                                            on_change=_skip_scroll_apply_once,
+                                        )
+
+                                    freq_map = {
+                                        "일간": ("D", 7),
+                                        "주간": ("W", 4),
+                                        "월간": ("ME", 3),
+                                    }
+                                    freq, ma_window = freq_map[freq_label]
+
+                                    DATE_RANGE_KEY = "rating_date_range"
+                                    default_date_range = (min_date, max_date)
+
+                                    with col_mid:
+                                        date_range = st.date_input(
+                                            "기간 선택",
+                                            value=default_date_range,
+                                            min_value=min_date,
+                                            max_value=max_date,
+                                            key=DATE_RANGE_KEY,
+                                            on_change=_skip_scroll_apply_once,
+                                        )
+
+                                    def reset_date_range():
+                                        _skip_scroll_apply_once()
+                                        st.session_state[DATE_RANGE_KEY] = (
+                                            min_date,
+                                            max_date,
+                                        )
+
+                                    with col_right:
+                                        st.markdown("<br>", unsafe_allow_html=True)
+                                        st.button(
+                                            "↺",
+                                            key="reset_date",
+                                            help="날짜 초기화",
+                                            on_click=reset_date_range,
+                                        )
+
+                                    trend_df = pd.DataFrame()
+                                    is_date_range_ready = False
+
+                                    if (
+                                        isinstance(date_range, tuple)
+                                        and len(date_range) == 2
+                                    ):
+                                        is_date_range_ready = True
+                                        start_date, end_date = date_range
+                                        start_date = pd.to_datetime(start_date)
+                                        end_date = pd.to_datetime(end_date)
+
+                                        date_df = review_df.loc[
+                                            (review_df["date"] >= start_date)
+                                            & (review_df["date"] <= end_date)
+                                        ]
+                                        if not date_df.empty:
+                                            trend_df = rating_trend(
+                                                date_df, freq=freq, ma_window=ma_window
+                                            )
+                                    else:
+                                        st.info("마지막 날짜를 선택해주세요.📆")
+
+                                    if is_date_range_ready and not trend_df.empty:
+                                        fig = go.Figure()
+                                        fig.add_trace(
+                                            go.Bar(
+                                                x=trend_df["date"],
+                                                y=trend_df["avg_score"],
+                                                name=f"{freq_label} 평균",
+                                                marker_color="slateblue",
+                                                opacity=0.4,
+                                            )
+                                        )
+                                        fig.add_trace(
+                                            go.Scatter(
+                                                x=trend_df["date"],
+                                                y=trend_df["ma"],
+                                                mode="lines",
+                                                name=f"추세 ({ma_window}개{freq_label} 이동평균)",
+                                                line=dict(color="royalblue", width=3),
+                                            )
+                                        )
+                                        fig.update_layout(
+                                            yaxis=dict(range=[1, 5.1]),
+                                            xaxis_title="날짜",
+                                            yaxis_title="평균 평점",
+                                            hovermode="x unified",
+                                            template="plotly_white",
+                                            height=350,
+                                        )
+                                        st.plotly_chart(fig, use_container_width=True)
+                                    elif is_date_range_ready and trend_df.empty:
+                                        st.info(
+                                            "선택한 기간에 대한 평점 데이터가 없습니다."
+                                        )
+
+                    elif task_type == "RECO":
+                        # 추천 결과 캐시 저장
+                        reco_list = (
+                            result
+                            if isinstance(result, list)
+                            else [item for items in result.values() for item in items]
+                        )
+                        st.session_state["reco_cache"] = reco_list
+                        st.session_state["reco_target_product_id"] = product_id
+
                 except Exception as e:
-                    st.warning(f"대표 리뷰 로드 실패: {e}")
-        else:
-            st.info("대표 리뷰가 없습니다.")
-
-        # 평점 추이용으로만 리뷰 로드
-        reviews_df = pd.DataFrame()
-        if product_id:
-            with st.spinner("정보를 불러오는 중입니다..."):
-                reviews_df = load_reviews_athena(str(product_id))
-
-        st.markdown("### 📈 평점 추이")
-        if (
-            reviews_df.empty
-            or "date" not in reviews_df.columns
-            or "score" not in reviews_df.columns
-        ):
-            st.info("평점 추이를 그릴 리뷰 데이터가 없습니다.")
-        else:
-            review_df = reviews_df[["date", "score"]].copy()
-            review_df["date"] = pd.to_datetime(review_df["date"], errors="coerce")
-            review_df["score"] = pd.to_numeric(review_df["score"], errors="coerce")
-            review_df = review_df.dropna(subset=["date", "score"]).sort_values("date")
-
-            if review_df.empty:
-                st.info("평점 추이를 그릴 수 있는 날짜/평점 데이터가 없습니다.")
-            else:
-                min_date = review_df["date"].min().date()
-                max_date = review_df["date"].max().date()
-
-                col_left, col_mid, col_right, _ = st.columns([1, 1, 1, 1])
-                with col_left:
-                    freq_label = st.selectbox(
-                        "평균 기준",
-                        ["일간", "주간", "월간"],
-                        index=2,
-                        key="rating_freq_label",
-                        on_change=_skip_scroll_apply_once,
-                    )
-
-                freq_map = {"일간": ("D", 7), "주간": ("W", 4), "월간": ("ME", 3)}
-                freq, ma_window = freq_map[freq_label]
-
-                DATE_RANGE_KEY = "rating_date_range"
-                default_date_range = (min_date, max_date)
-
-                with col_mid:
-                    date_range = st.date_input(
-                        "기간 선택",
-                        value=default_date_range,
-                        min_value=min_date,
-                        max_value=max_date,
-                        key=DATE_RANGE_KEY,
-                        on_change=_skip_scroll_apply_once,
-                    )
-
-                def reset_date_range():
-                    _skip_scroll_apply_once()
-                    st.session_state[DATE_RANGE_KEY] = (min_date, max_date)
-
-                with col_right:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.button(
-                        "↺",
-                        key="reset_date",
-                        help="날짜 초기화",
-                        on_click=reset_date_range,
-                    )
-
-                trend_df = pd.DataFrame()
-                is_date_range_ready = False
-
-                if isinstance(date_range, tuple) and len(date_range) == 2:
-                    is_date_range_ready = True
-                    start_date, end_date = date_range
-                    start_date = pd.to_datetime(start_date)
-                    end_date = pd.to_datetime(end_date)
-
-                    date_df = review_df.loc[
-                        (review_df["date"] >= start_date)
-                        & (review_df["date"] <= end_date)
-                    ]
-                    if not date_df.empty:
-                        with st.spinner("정보를 불러오는 중입니다..."):
-                            trend_df = rating_trend(
-                                date_df, freq=freq, ma_window=ma_window
-                            )
-                else:
-                    st.info("마지막 날짜를 선택해주세요.📆")
-
-                if is_date_range_ready and not trend_df.empty:
-                    fig = go.Figure()
-                    fig.add_trace(
-                        go.Bar(
-                            x=trend_df["date"],
-                            y=trend_df["avg_score"],
-                            name=f"{freq_label} 평균",
-                            marker_color="slateblue",
-                            opacity=0.4,
-                        )
-                    )
-                    fig.add_trace(
-                        go.Scatter(
-                            x=trend_df["date"],
-                            y=trend_df["ma"],
-                            mode="lines",
-                            name=f"추세 ({ma_window}개{freq_label} 이동평균)",
-                            line=dict(color="royalblue", width=3),
-                        )
-                    )
-                    fig.update_layout(
-                        yaxis=dict(range=[1, 5.1]),
-                        xaxis_title="날짜",
-                        yaxis_title="평균 평점",
-                        hovermode="x unified",
-                        template="plotly_white",
-                        height=350,
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                elif is_date_range_ready and trend_df.empty:
-                    st.info("선택한 기간에 대한 평점 데이터가 없습니다.")
+                    if task_type == "REVIEW":
+                        with container_review.container():
+                            st.markdown("### ✒️ 대표 리뷰")
+                            st.error(f"대표 리뷰 로드 실패: {e}")
+                    elif task_type == "TREND":
+                        with container_trend.container():
+                            st.markdown("### 📈 평점 추이")
+                            st.error(f"평점 추이 로드 실패: {e}")
+                    elif task_type == "RECO":
+                        st.error(f"추천 상품 로드 실패: {e}")
+        # ---------------------------------------------------------
 
 
 # =========================
