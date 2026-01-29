@@ -22,6 +22,7 @@ from athena_queries import (
     fetch_all_products,
     fetch_reviews_by_product,
     search_products_flexible,
+    fetch_representative_review_text,
 )
 
 
@@ -427,18 +428,32 @@ if selected_product:
         product_id = product_info.get("product_id", "")
         review_id = product_info.get("representative_review_id_roberta", None)
 
+        # ✅ 대표 리뷰는 ID로 직접 가져오기 (모든 리뷰 로드 불필요)
+        st.markdown("### ✒️ 대표 리뷰")
+        if product_id and pd.notna(review_id):
+            with st.spinner("대표 리뷰 로딩 중..."):
+                try:
+                    rep_df = fetch_representative_review_text(
+                        str(product_id), int(review_id)
+                    )
+                    if not rep_df.empty and "full_text" in rep_df.columns:
+                        text = rep_df.iloc[0]["full_text"]
+                        if text:
+                            st.text(text)
+                        else:
+                            st.info("대표 리뷰가 없습니다.")
+                    else:
+                        st.info("대표 리뷰가 없습니다.")
+                except Exception as e:
+                    st.warning(f"대표 리뷰 로드 실패: {e}")
+        else:
+            st.info("대표 리뷰가 없습니다.")
+
+        # 평점 추이용으로만 리뷰 로드
         reviews_df = pd.DataFrame()
         if product_id:
             with st.spinner("정보를 불러오는 중입니다..."):
                 reviews_df = load_reviews_athena(str(product_id))
-
-        st.markdown("### ✒️ 대표 리뷰")
-        with st.spinner("정보를 불러오는 중입니다..."):
-            text = get_representative_review_text(reviews_df, review_id)
-        if not text:
-            st.info("대표 리뷰가 없습니다.")
-        else:
-            st.text(text)
 
         st.markdown("### 📈 평점 추이")
         if (
@@ -469,7 +484,7 @@ if selected_product:
                         on_change=_skip_scroll_apply_once,
                     )
 
-                freq_map = {"일간": ("D", 7), "주간": ("W", 4), "월간": ("M", 3)}
+                freq_map = {"일간": ("D", 7), "주간": ("W", 4), "월간": ("ME", 3)}
                 freq, ma_window = freq_map[freq_label]
 
                 DATE_RANGE_KEY = "rating_date_range"
@@ -513,7 +528,9 @@ if selected_product:
                     ]
                     if not date_df.empty:
                         with st.spinner("정보를 불러오는 중입니다..."):
-                            trend_df = rating_trend(date_df, freq=freq, ma_window=ma_window)
+                            trend_df = rating_trend(
+                                date_df, freq=freq, ma_window=ma_window
+                            )
                 else:
                     st.info("마지막 날짜를 선택해주세요.📆")
 
@@ -538,7 +555,7 @@ if selected_product:
                         )
                     )
                     fig.update_layout(
-                        yaxis=dict(range=[1, 5]),
+                        yaxis=dict(range=[1, 5.1]),
                         xaxis_title="날짜",
                         yaxis_title="평균 평점",
                         hovermode="x unified",
@@ -637,12 +654,11 @@ else:
     search_df_view["badge_rank"] = (
         search_df_view.get("badge", "").map(badge_order).fillna(2)
     )
-    # 상품 정렬: 
+    # 상품 정렬:
     search_df_view = search_df_view.sort_values(
-    by=["badge_rank", "score", "total_reviews"],
-    ascending=[True, False, False],
+        by=["badge_rank", "score", "total_reviews"],
+        ascending=[True, False, False],
     )
-
 
     # =========================
     # ✅ 추천(벡터 기반)은 기존 df(전체 메타) 기준으로 유지
