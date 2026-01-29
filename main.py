@@ -31,6 +31,11 @@ if "search_keyword" not in st.session_state:
     st.session_state["search_keyword"] = ""
 if "page" not in st.session_state:
     st.session_state.page = 1
+if "reco_cache" not in st.session_state:
+    st.session_state["reco_cache"] = {}
+if "reco_target_product_id" not in st.session_state:
+    st.session_state["reco_target_product_id"] = None
+
 
 sys.path.append(os.path.dirname(__file__))
 
@@ -629,20 +634,27 @@ else:
             if not target_product.empty:
                 target_product_id = target_product.iloc[0]["product_id"]
 
-                reco_results = recommend_similar_products(
-                    product_id=target_product_id,
-                    categories=None,
-                    top_n=100,
-                )
+                if st.session_state["reco_target_product_id"] != target_product_id:
+                    reco_results = recommend_similar_products(
+                        product_id=target_product_id,
+                        categories=None,
+                        top_n=100,
+                    )
 
-                # list일 경우
-                if isinstance(reco_results, list):
-                    reco_list = reco_results
+                    # list일 경우
+                    if isinstance(reco_results, list):
+                        reco_list = reco_results
+                    else:
+                        # dict일 경우
+                        reco_list = []
+                        for _, items in reco_results.items():
+                            reco_list.extend(items)
+
+                    st.session_state["reco_cache"] = reco_list
+                    st.session_state["reco_target_product_id"] = target_product_id
+
                 else:
-                    # dict일 경우
-                    reco_list = []
-                    for _, items in reco_results.items():
-                        reco_list.extend(items)
+                    reco_list = st.session_state["reco_cache"]
 
                 if reco_list:
                     tmp_reco_df = pd.DataFrame(reco_list).rename(
