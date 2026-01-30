@@ -336,8 +336,8 @@ if is_initial:
 
                 st.markdown(
                     f"""
-                    <div style="font-size:14px;color:#888;margin-top:4px;">
-                    {row.get('brand','')}
+                    <div style="font-size:14px;color:#888;margin-top:4px;min-height:20px;">
+                    {str(row.get('brand','')) if pd.notna(row.get('brand')) else '&nbsp;'}
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -345,7 +345,7 @@ if is_initial:
 
                 st.markdown(
                     f"""
-                    <div style="font-size:13px;font-weight:500;line-height:1.3;margin:2px 0;">
+                    <div style="font-size:13px;font-weight:500;line-height:1.3;margin:2px 0;height:34px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">
                     {row.get('product_name','')}
                     </div>
                     """,
@@ -666,7 +666,7 @@ if not is_initial:
     col_1, col_2 = st.columns([7, 3])
     with col_2:
         sort_option = st.selectbox(
-            "",
+            "정렬 옵션",
             options=[
                 "추천순",
                 "평점 높은 순",
@@ -676,6 +676,7 @@ if not is_initial:
             ],
             index=0,
             key="sort_option",
+            label_visibility="collapsed",
             on_change=_skip_scroll_apply_once,
         )
 
@@ -979,12 +980,12 @@ elif (not is_initial) and (not selected_product) and (not page_df.empty):
 
                                     st.markdown(
                                         f"""
-                                        <div style="font-size:14px;color:#888;">
-                                        {row.get('brand','')}
+                                        <div style="font-size:14px;color:#888;min-height:22px;">
+                                        {str(row.get('brand','')) if pd.notna(row.get('brand')) else '&nbsp;'}
                                         {badge_html}
                                         </div>
 
-                                        <div style="font-size:18px;font-weight:600;margin:4px 0;">
+                                        <div style="font-size:18px;font-weight:600;margin:4px 0;height:50px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3;">
                                         {row.get('product_name','')}
                                         </div>
 
@@ -1076,12 +1077,12 @@ elif (not is_initial) and (not selected_product) and (not page_df.empty):
 
                                 st.markdown(
                                     f"""
-                                    <div style="font-size:14px;color:#888;">
-                                    {row.get('brand','')}
+                                    <div style="font-size:14px;color:#888;min-height:22px;">
+                                    {str(row.get('brand','')) if pd.notna(row.get('brand')) else '&nbsp;'}
                                     {badge_html}
                                     </div>
 
-                                    <div style="font-size:18px;font-weight:600;margin:4px 0;">
+                                    <div style="font-size:18px;font-weight:600;margin:4px 0;height:50px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3;">
                                     {row.get('product_name','')}
                                     </div>
 
@@ -1132,11 +1133,11 @@ if selected_product:
                             with col_info:
                                 st.markdown(
                                     f"""
-                                    <div style="font-size:14px;color:#888;">
-                                    {row.get('brand','')}
+                                    <div style="font-size:14px;color:#888;min-height:20px;">
+                                    {str(row.get('brand','')) if pd.notna(row.get('brand')) else '&nbsp;'}
                                     </div>
 
-                                    <div style="font-size:18px;font-weight:600;">
+                                    <div style="font-size:18px;font-weight:600;height:50px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3;margin:4px 0;">
                                     {row.get('product_name','')}
                                     </div>
 
