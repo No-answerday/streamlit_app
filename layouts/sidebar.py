@@ -8,7 +8,11 @@ def sidebar(df):
     # 상품 선택 시 사이드바 잠금
     sidebar_disabled = bool(st.session_state.get("product_search"))
 
-    if st.sidebar.button("🏠 홈으로 가기", use_container_width=True, disabled=False,):
+    if st.sidebar.button(
+        "🏠 홈으로 가기",
+        use_container_width=True,
+        disabled=False,
+    ):
         # 검색어 및 페이지 초기화
         st.session_state["product_search"] = ""
         st.session_state["search_keyword"] = ""
@@ -143,7 +147,7 @@ def sidebar(df):
                                 key=middle_all_key,
                                 on_change=toggle_middle_all,
                                 args=(middle_sub_keys, middle_all_key),
-                                disabled=sidebar_disabled
+                                disabled=sidebar_disabled,
                             )
 
                             for sub in sub_cats:
