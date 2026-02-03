@@ -16,6 +16,8 @@ MAIN_CATS = [
     "클렌징/필링",
     "선케어/태닝",
     "메이크업",
+    "헤어/바디",
+    "바디",
 ]
 
 DEFAULT_IMAGE_URL = "https://tr.rbxcdn.com/180DAY-981c49e917ba903009633ed32b3d0ef7/420/420/Hat/Webp/noFilter"
@@ -25,11 +27,19 @@ def norm_cat(path: str) -> str:
     """카테고리 경로 정규화"""
     if not isinstance(path, str):
         return ""
+
+    # 불필요한 prefix 제거
+    remove_prefixes = ["쿠팡 홈", "쿠팡홈", "R.LUX", "뷰티", "전체", "화장품"]
     parts = [p.strip() for p in path.split(">")]
-    for main in MAIN_CATS:
-        if main in parts:
-            idx = parts.index(main)
-            return " > ".join(parts[idx:])
+
+    # prefix 제거
+    filtered_parts = [p for p in parts if p not in remove_prefixes]
+
+    # MAIN_CATS에서 찾기
+    for i, part in enumerate(filtered_parts):
+        for main in MAIN_CATS:
+            if part == main:
+                return " > ".join(filtered_parts[i:])
     return ""
 
 
@@ -217,7 +227,9 @@ def apply_filters(
             filtered_df["product_name"]
             .astype(str)
             .str.contains(s, case=False, na=False, regex=False)
-            | filtered_df["brand"].astype(str).str.contains(s, case=False, na=False, regex=False)
+            | filtered_df["brand"]
+            .astype(str)
+            .str.contains(s, case=False, na=False, regex=False)
             | filtered_df.get("top_keywords", pd.Series([""] * len(filtered_df)))
             .astype(str)
             .str.contains(s, case=False, na=False, regex=False)
