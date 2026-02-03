@@ -216,10 +216,13 @@ def load_product_analysis_async(
                 result = future.result()
 
                 if task_type == "REVIEW":
+                    st.session_state["_rep_review_df_cache"] = result
+                    st.session_state["_analysis_cache_product_id"] = str(product_id)
                     render_representative_review(container_review, result)
 
                 elif task_type == "TREND":
                     st.session_state["_reviews_df_cache"] = result
+                    st.session_state["_analysis_cache_product_id"] = str(product_id)
                     render_rating_trend(container_trend, result, skip_scroll_callback)
 
                 elif task_type == "RECO":

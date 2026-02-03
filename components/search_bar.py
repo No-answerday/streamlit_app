@@ -23,14 +23,14 @@ def render_search_bar(product_options: list, on_clear_callback):
 
         with col_text:
             st.text_input(
-                "🗝️키워드 검색",
+                "🗝️키워드로 검색",
                 placeholder="예: 수분, 촉촉, 진정",
                 key="search_keyword",
             )
 
         with col_sel:
             st.selectbox(
-                "🔎 제품명 검색",
+                "🔎 제품명으로 검색",
                 options=[""] + product_options,
                 key="product_search",
             )

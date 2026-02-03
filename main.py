@@ -17,6 +17,8 @@ from components.product_info import render_product_info
 from components.product_analysis import (
     render_top_keywords,
     load_product_analysis_async,
+    render_representative_review,
+    render_rating_trend,
 )
 from components.product_cards import (
     render_popular_products,
@@ -97,7 +99,6 @@ def clear_selected_product():
 def select_product_from_reco(product_name: str):
     """추천 상품 클릭 시 선택"""
     st.session_state["product_search"] = product_name
-    st.session_state["search_keyword"] = product_name
     safe_scroll_to_top()
 
 
@@ -164,6 +165,26 @@ def main():
             container_review = st.empty()
             container_trend = st.empty()
 
+            # rerun시에도 캐시로 복구 렌더
+            cache_pid = st.session_state.get("_analysis_cache_product_id")
+            same_product_cache = (str(product_id) == str(cache_pid))
+
+            if same_product_cache:
+                rep_cache = st.session_state.get("_rep_review_df_cache")
+                if rep_cache is not None:
+                    render_representative_review(container_review, rep_cache)
+
+                trend_cache = st.session_state.get("_reviews_df_cache")
+                if trend_cache is not None:
+                    render_rating_trend(container_trend, trend_cache, skip_scroll_apply_once)
+
+            # 상품이 바뀐 경우만 비동기 재로딩
+            if st.session_state.get("last_loaded_product_id") != product_id:
+                # 순간 잔상 제거용
+                st.session_state["_rep_review_df_cache"] = None
+                st.session_state["_reviews_df_cache"] = None
+                st.session_state["_analysis_cache_product_id"] = str(product_id)
+
             if st.session_state.get("last_loaded_product_id") != product_id:
                 load_product_analysis_async(
                     product_id,
@@ -183,7 +204,7 @@ def main():
             st.markdown("---")
             st.subheader("👍 이 상품과 유사한 추천 상품")
 
-            col_1, col_2, col_3 = st.columns([6, 2, 2])
+            col_1, col_2, col_3 = st.columns([5, 2, 3])
             with col_2:
                 sort_option = st.selectbox(
                     "정렬 옵션",
@@ -202,7 +223,7 @@ def main():
 
             with col_3:
                 if selected_product:
-                    all_categories = sorted(df["sub_category"].dropna().unique())
+                    all_categories = sorted(c for c in df["sub_category"].unique() if isinstance(c, str) and c.strip())
 
                     # 현재 선택된 상품 카테고리
                     current_category = (
@@ -223,6 +244,7 @@ def main():
                         "",
                         all_categories,
                         index=default_index,
+                        key="reco_category_select",
                         label_visibility="collapsed",
                     )
 
@@ -313,7 +335,7 @@ def main():
         else:
             # 추천 상품 조회 및 출력
             with st.spinner("정보를 불러오는 중입니다..."):
-                reco_df_view = get_recommendations(df, selected_product, [selected_categories] if selected_categories else None)
+                reco_df_view = get_recommendations(df, selected_product, [selected_categories])
 
             if sort_option == "추천순":
                 reco_df_view = reco_df_view.sort_values(

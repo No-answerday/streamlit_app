@@ -5,6 +5,10 @@ import pyarrow.dataset as ds
 import streamlit as st
 import re
 import ast
+import unicodedata
+
+def normalize_text(s):
+    return unicodedata.normalize("NFKC", s).strip()
 
 
 @st.cache_data
@@ -136,15 +140,16 @@ def make_df(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # 카테고리 정규화
-    main_cats = ["스킨케어", "클렌징/필링", "선케어/태닝", "메이크업"]
+    main_cats = ["스킨케어", "클렌징/필링", "선케어/태닝", "메이크업", "헤어/바디"]
 
     def norm_cat(path):
         if not isinstance(path, str):
             return ""
 
-        parts = [p.strip() for p in path.split(">")]
+        parts = [normalize_text(p) for p in path.split(">")]
 
         for main in main_cats:
+            main = normalize_text(main)
             if main in parts:
                 idx = parts.index(main)
                 return " > ".join(parts[idx:])
