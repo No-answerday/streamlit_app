@@ -5,7 +5,10 @@ import re
 
 # 사이드바 함수
 def sidebar(df):
-    if st.sidebar.button("🏠 홈으로 가기", use_container_width=True):
+    # 상품 선택 시 사이드바 잠금
+    sidebar_disabled = bool(st.session_state.get("product_search"))
+
+    if st.sidebar.button("🏠 홈으로 가기", use_container_width=True, disabled=False,):
         # 검색어 및 페이지 초기화
         st.session_state["product_search"] = ""
         st.session_state["search_keyword"] = ""
@@ -57,13 +60,13 @@ def sidebar(df):
                         key = f"sub_{main_cat}_{middle}_{sub}"
                         all_category_keys.append(key)
 
-    # 전체 선택 버튼 초기화 (최초 실행 시 True)
+    # 전체 선택 버튼 초기화
     if "category_select_all" not in st.session_state:
-        st.session_state["category_select_all"] = True
-        # 모든 카테고리 키를 True로 설정
+        st.session_state["category_select_all"] = False
+        # 모든 카테고리 키를 False로 설정
         for key in all_category_keys:
             if key not in st.session_state:
-                st.session_state[key] = True
+                st.session_state[key] = False
 
     # 전체 선택/해제 토글 함수
     def toggle_all_categories():
@@ -72,82 +75,84 @@ def sidebar(df):
             st.session_state[key] = val
 
     # 최상단 노드: 전체 카테고리
-    with st.sidebar.expander("카테고리", expanded=True):
-        st.checkbox(
-            "전체 선택/해제",
-            key="category_select_all",
-            on_change=toggle_all_categories,
-        )
+    st.sidebar.subheader("카테고리")
+    st.sidebar.checkbox(
+        "전체 선택/해제",
+        key="category_select_all",
+        on_change=toggle_all_categories,
+        disabled=sidebar_disabled,
+    )
 
-        # st.markdown("---")  # 구분선
+    # st.markdown("---")  # 구분선
 
-        selected_sub_cat = []
+    selected_sub_cat = []
 
-        for main_cat in sorted(df["main_category"].dropna().unique()):
-            if not str(main_cat).strip():
-                continue
+    for main_cat in sorted(df["main_category"].dropna().unique()):
+        if not str(main_cat).strip():
+            continue
 
-            with st.expander(str(main_cat), expanded=False):
-                main_df = df[df["main_category"] == main_cat]
-                middle_cats = [
-                    m
-                    for m in main_df["middle_category"].dropna().unique().tolist()
-                    if str(m).strip()
-                ]
+        with st.sidebar.expander(str(main_cat), expanded=False):
+            main_df = df[df["main_category"] == main_cat]
+            middle_cats = [
+                m
+                for m in main_df["middle_category"].dropna().unique().tolist()
+                if str(m).strip()
+            ]
 
-                main_all_key = f"all_main_{main_cat}"
-                main_sub_keys = []
+            main_all_key = f"all_main_{main_cat}"
+            main_sub_keys = []
 
-                # 중간 카테고리x
-                if not middle_cats:
-                    sub_cats = sorted(main_df["sub_category"].dropna().unique())
+            # 중간 카테고리x
+            if not middle_cats:
+                sub_cats = sorted(main_df["sub_category"].dropna().unique())
 
-                    for sub in sub_cats:
-                        key = f"sub_{main_cat}_{sub}"
+                for sub in sub_cats:
+                    key = f"sub_{main_cat}_{sub}"
+                    main_sub_keys.append(key)
+
+                    if st.checkbox(sub, key=key, disabled=sidebar_disabled):
+                        selected_sub_cat.append(sub)
+
+            # 중간 카테고리o
+            else:
+                for middle in sorted(middle_cats):
+                    sub_df = main_df[main_df["middle_category"] == middle]
+                    sub_cats = sorted(sub_df["sub_category"].dropna().unique())
+
+                    # mid == sub 인 경우: expander 없이 checkbox 하나
+                    if len(sub_cats) == 1 and sub_cats[0] == middle:
+                        key = f"sub_{main_cat}_{middle}"
                         main_sub_keys.append(key)
 
-                        if st.checkbox(sub, key=key):
-                            selected_sub_cat.append(sub)
+                        if st.checkbox(middle, key=key, disabled=sidebar_disabled):
+                            selected_sub_cat.append(middle)
 
-                # 중간 카테고리o
-                else:
-                    for middle in sorted(middle_cats):
-                        sub_df = main_df[main_df["middle_category"] == middle]
-                        sub_cats = sorted(sub_df["sub_category"].dropna().unique())
+                    # 일반적인 mid > sub 구조
+                    else:
+                        with st.expander(middle, expanded=False):
+                            middle_all_key = f"all_middle_{main_cat}_{middle}"
+                            middle_sub_keys = []
 
-                        # mid == sub 인 경우: expander 없이 checkbox 하나
-                        if len(sub_cats) == 1 and sub_cats[0] == middle:
-                            key = f"sub_{main_cat}_{middle}"
-                            main_sub_keys.append(key)
+                            def toggle_middle_all(keys, all_key):
+                                val = st.session_state.get(all_key, False)
+                                for k in keys:
+                                    st.session_state[k] = val
 
-                            if st.checkbox(middle, key=key):
-                                selected_sub_cat.append(middle)
+                            st.checkbox(
+                                "전체 선택",
+                                key=middle_all_key,
+                                on_change=toggle_middle_all,
+                                args=(middle_sub_keys, middle_all_key),
+                                disabled=sidebar_disabled
+                            )
 
-                        # 일반적인 mid > sub 구조
-                        else:
-                            with st.expander(middle, expanded=False):
-                                middle_all_key = f"all_middle_{main_cat}_{middle}"
-                                middle_sub_keys = []
+                            for sub in sub_cats:
+                                key = f"sub_{main_cat}_{middle}_{sub}"
+                                middle_sub_keys.append(key)
+                                main_sub_keys.append(key)
 
-                                def toggle_middle_all(keys, all_key):
-                                    val = st.session_state.get(all_key, False)
-                                    for k in keys:
-                                        st.session_state[k] = val
-
-                                st.checkbox(
-                                    "전체 선택",
-                                    key=middle_all_key,
-                                    on_change=toggle_middle_all,
-                                    args=(middle_sub_keys, middle_all_key),
-                                )
-
-                                for sub in sub_cats:
-                                    key = f"sub_{main_cat}_{middle}_{sub}"
-                                    middle_sub_keys.append(key)
-                                    main_sub_keys.append(key)
-
-                                    if st.checkbox(sub, key=key):
-                                        selected_sub_cat.append(sub)
+                                if st.checkbox(sub, key=key, disabled=sidebar_disabled):
+                                    selected_sub_cat.append(sub)
 
     st.sidebar.caption(f"선택된 카테고리: {len(selected_sub_cat)}개")
 
@@ -168,7 +173,7 @@ def sidebar(df):
     selected_skin = []
 
     for skin in ordered_skins:
-        if st.sidebar.checkbox(skin, key=f"skin_{skin}"):
+        if st.sidebar.checkbox(skin, key=f"skin_{skin}", disabled=sidebar_disabled):
             if skin in skin_mapping:
                 selected_skin.extend(skin_mapping[skin])
             else:
@@ -183,6 +188,7 @@ def sidebar(df):
         value=(0.0, 5.0),
         step=0.1,
         label_visibility="collapsed",
+        disabled=sidebar_disabled,
     )
 
     # 가격 슬라이더
@@ -198,6 +204,7 @@ def sidebar(df):
         value=(df_min, df_max),
         step=1000,
         label_visibility="collapsed",
+        disabled=sidebar_disabled,
     )
 
     return selected_sub_cat, selected_skin, min_rating, max_rating, min_price, max_price
