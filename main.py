@@ -167,7 +167,7 @@ def main():
 
             # rerun시에도 캐시로 복구 렌더
             cache_pid = st.session_state.get("_analysis_cache_product_id")
-            same_product_cache = (str(product_id) == str(cache_pid))
+            same_product_cache = str(product_id) == str(cache_pid)
 
             if same_product_cache:
                 rep_cache = st.session_state.get("_rep_review_df_cache")
@@ -176,7 +176,9 @@ def main():
 
                 trend_cache = st.session_state.get("_reviews_df_cache")
                 if trend_cache is not None:
-                    render_rating_trend(container_trend, trend_cache, skip_scroll_apply_once)
+                    render_rating_trend(
+                        container_trend, trend_cache, skip_scroll_apply_once
+                    )
 
             # 상품이 바뀐 경우만 비동기 재로딩
             if st.session_state.get("last_loaded_product_id") != product_id:
@@ -223,12 +225,17 @@ def main():
 
             with col_3:
                 if selected_product:
-                    all_categories = sorted(c for c in df["sub_category"].unique() if isinstance(c, str) and c.strip())
+                    all_categories = sorted(
+                        c
+                        for c in df["sub_category"].unique()
+                        if isinstance(c, str) and c.strip()
+                    )
 
                     # 현재 선택된 상품 카테고리
                     current_category = (
-                        df.loc[df["product_name"] == selected_product, "sub_category"]
-                        .iloc[0]
+                        df.loc[
+                            df["product_name"] == selected_product, "sub_category"
+                        ].iloc[0]
                         if selected_product in df["product_name"].values
                         else None
                     )
@@ -277,6 +284,7 @@ def main():
         st.info("왼쪽 사이드바 또는 검색어를 입력하여 상품을 찾아보세요.")
     else:
         if not selected_product:
+            search_type = st.session_state.get("search_type", "키워드")
             filtered_df = apply_filters(
                 df,
                 selected_sub_cat,
@@ -286,6 +294,7 @@ def main():
                 min_price,
                 max_price,
                 search_text,
+                search_type,
             )
 
             # 정렬 적용
@@ -335,7 +344,9 @@ def main():
         else:
             # 추천 상품 조회 및 출력
             with st.spinner("정보를 불러오는 중입니다..."):
-                reco_df_view = get_recommendations(df, selected_product, [selected_categories])
+                reco_df_view = get_recommendations(
+                    df, selected_product, [selected_categories]
+                )
 
             if sort_option == "추천순":
                 reco_df_view = reco_df_view.sort_values(
