@@ -8,7 +8,11 @@ def sidebar(df):
     # 상품 선택 시 사이드바 잠금
     sidebar_disabled = bool(st.session_state.get("product_search"))
 
-    if st.sidebar.button("🏠 홈으로 가기", use_container_width=True, disabled=False,):
+    if st.sidebar.button(
+        "🏠 홈으로 가기",
+        use_container_width=True,
+        disabled=False,
+    ):
         # 검색어 및 페이지 초기화
         st.session_state["product_search"] = ""
         st.session_state["search_keyword"] = ""
@@ -99,8 +103,8 @@ def sidebar(df):
                 if str(m).strip()
             ]
 
+            main_all_key = f"all_main_{main_cat}"
             main_sub_keys = []
-            standalone_subs = []
 
             # 중간 카테고리x
             if not middle_cats:
@@ -119,9 +123,15 @@ def sidebar(df):
                     sub_df = main_df[main_df["middle_category"] == middle]
                     sub_cats = sorted(sub_df["sub_category"].dropna().unique())
 
-                    # mid == sub → 단독 sub로 취급
+                    # mid == sub 인 경우: expander 없이 checkbox 하나
                     if len(sub_cats) == 1 and sub_cats[0] == middle:
-                        standalone_subs.append(middle)
+                        key = f"sub_{main_cat}_{middle}"
+                        main_sub_keys.append(key)
+
+                        if st.checkbox(middle, key=key, disabled=sidebar_disabled):
+                            selected_sub_cat.append(middle)
+
+                    # 일반적인 mid > sub 구조
                     else:
                         with st.expander(middle, expanded=False):
                             middle_all_key = f"all_middle_{main_cat}_{middle}"
@@ -147,14 +157,6 @@ def sidebar(df):
 
                                 if st.checkbox(sub, key=key, disabled=sidebar_disabled):
                                     selected_sub_cat.append(sub)
-
-                if standalone_subs:
-                    for sub in sorted(standalone_subs):
-                        key = f"sub_{main_cat}_{sub}"
-                        main_sub_keys.append(key)
-
-                        if st.checkbox(sub, key=key, disabled=sidebar_disabled):
-                            selected_sub_cat.append(sub)
 
     st.sidebar.caption(f"선택된 카테고리: {len(selected_sub_cat)}개")
 

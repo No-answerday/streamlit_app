@@ -7,8 +7,15 @@ import re
 import ast
 import unicodedata
 
+
 def normalize_text(s):
-    return unicodedata.normalize("NFKC", s).strip()
+    if not isinstance(s, str):
+        return ""
+    # NFKC 정규화 + 공백 제거 + 슬래시 주변 공백 제거
+    normalized = unicodedata.normalize("NFKC", s).strip()
+    # 슬래시 앞뒤 공백 제거 (예: "헤어 / 바디" → "헤어/바디")
+    normalized = re.sub(r"\s*/\s*", "/", normalized)
+    return normalized
 
 
 @st.cache_data
@@ -140,19 +147,40 @@ def make_df(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # 카테고리 정규화
-    main_cats = ["스킨케어", "클렌징/필링", "선케어/태닝", "메이크업", "헤어/바디"]
+    main_cats = [
+        "스킨케어",
+        "클렌징/필링",
+        "선케어/태닝",
+        "메이크업",
+        "헤어/바디",
+        "바디",
+    ]
 
     def norm_cat(path):
         if not isinstance(path, str):
             return ""
 
-        parts = [normalize_text(p) for p in path.split(">")]
+        # 불필요한 prefix 제거 (정확한 매칭을 위해 정규화 후 비교)
+        remove_prefixes = ["쿠팡 홈", "쿠팡홈", "R.LUX", "뷰티", "전체", "화장품"]
+        parts = [p.strip() for p in path.split(">")]
 
-        for main in main_cats:
-            main = normalize_text(main)
-            if main in parts:
-                idx = parts.index(main)
-                return " > ".join(parts[idx:])
+        # prefix 제거 (대소문자 구분 없이)
+        filtered_parts = []
+        for p in parts:
+            p_normalized = normalize_text(p)
+            if p_normalized not in remove_prefixes:
+                filtered_parts.append(p_normalized)
+
+        # main_cats에 있는 카테고리 찾기
+        for i, part in enumerate(filtered_parts):
+            part_normalized = normalize_text(part)
+            for main in main_cats:
+                main_normalized = normalize_text(main)
+                # "헤어/바디"나 "바디" 등을 찾으면 그 위치부터 반환
+                if part_normalized == main_normalized:
+                    return " > ".join(filtered_parts[i:])
+
+        # main_cats에 없으면 빈 문자열 (사이드바에 표시 안됨)
         return ""
 
     def split_category(path: str):
@@ -163,7 +191,18 @@ def make_df(df: pd.DataFrame) -> pd.DataFrame:
 
         main = parts[0] if len(parts) >= 1 else ""
         middle = parts[1] if len(parts) >= 2 else ""
-        sub = parts[-1] if len(parts) >= 3 else parts[-1] if parts else ""
+
+        # depth가 3 이상일 때
+        if len(parts) >= 3:
+            # 3단계면 그대로, 4단계 이상이면 중간 카테고리 합치기
+            if len(parts) == 3:
+                sub = parts[2]
+            else:
+                # 4단계 이상: middle을 2번째부터 마지막 전까지 합치고, sub는 마지막
+                middle = " > ".join(parts[1:-1])
+                sub = parts[-1]
+        else:
+            sub = parts[-1] if parts else ""
 
         return main, middle, sub
 
