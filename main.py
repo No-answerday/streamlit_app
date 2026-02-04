@@ -125,6 +125,25 @@ def main():
         max_price,
     ) = sidebar(df)
 
+    st.set_page_config(
+    page_title="화장품 추천 대시보드",
+    page_icon="🎀",
+    layout="wide",
+    )
+
+    st.markdown("""
+        <style>
+        .info-icon {
+            cursor: help;
+            color: #888;
+            font-size: 18px;
+        }
+        </style>
+        <span class="info-icon" title="다크 모드에서는 일부 UI가 정상적으로 표시되지 않을 수 있습니다. 원할한 이용을 위해 라이트 모드 사용을 권장합니다.">
+        ⓘ
+        </span>
+        """, unsafe_allow_html=True)
+
     # 메인 타이틀
     st.title("🎀 화장품 추천 대시보드")
     st.markdown("---")
@@ -331,9 +350,10 @@ def main():
                 st.warning("표시할 상품이 없어요.🥺")
             else:
                 render_search_results_grid(
-                    page_df,
-                    category_count,
-                    select_product_from_reco,
+                    page_df=page_df,
+                    full_df=search_df_view,
+                    category_count=category_count,
+                    on_select_callback=select_product_from_reco,
                 )
                 # =========================
                 # 페이지네이션
@@ -357,6 +377,22 @@ def main():
                 reco_df_view = sort_products(reco_df_view, sort_option)
 
             render_recommendations_grid(reco_df_view, select_product_from_reco)
+
+    st.markdown("""
+        <style>
+        .footer {
+            font-size: 12px;
+            color: #777;
+            text-align: center;
+            padding: 16px 0;
+        }
+        </style>
+
+        <div class="footer">
+            <br><br><br>
+            ⓒ 2026 Team Tensor · Multicampus team project
+        </div>
+        """, unsafe_allow_html=True)
 
     # CSS 적용
     css.set_css()

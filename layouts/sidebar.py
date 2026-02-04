@@ -28,7 +28,7 @@ def sidebar(df):
 
         st.rerun()  # 즉시 반영을 위해 재실행
 
-    st.sidebar.markdown("---")  # 구분선
+    # st.sidebar.markdown("---")  # 구분선
     st.sidebar.header("검색 조건")
 
     # 전체 카테고리 키 수집

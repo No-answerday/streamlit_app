@@ -117,7 +117,7 @@ def render_pagination(total_pages: int, scroll_to_top_callback):
     if total_pages <= 1:
         return
 
-    st.markdown("---")
+    # st.markdown("---")
     col_prev, col_info, col_next = st.columns([1, 2, 1])
 
     def go_prev():
@@ -131,10 +131,10 @@ def render_pagination(total_pages: int, scroll_to_top_callback):
             scroll_to_top_callback()
 
     with col_prev:
-        st.button("이전", key="prev_page", on_click=go_prev)
+        st.button("이전", key="prev_page", on_click=go_prev, use_container_width=True)
 
     with col_next:
-        st.button("다음", key="next_page", on_click=go_next)
+        st.button("다음", key="next_page", on_click=go_next, use_container_width=True)
 
     with col_info:
         st.markdown(

@@ -208,6 +208,7 @@ def render_popular_products(df: pd.DataFrame, on_select_callback):
 
 def render_search_results_grid(
     page_df: pd.DataFrame,
+    full_df: pd.DataFrame,
     category_count: int,
     on_select_callback,
 ):
@@ -230,6 +231,7 @@ def render_search_results_grid(
             _render_category_section(
                 category_name,
                 category_df,
+                full_df,
                 category_count,
                 on_select_callback,
             )
@@ -241,6 +243,7 @@ def render_search_results_grid(
 def _render_category_section(
     category_name,
     category_df: pd.DataFrame,
+    full_df: pd.DataFrame,
     category_count: int,
     on_select_callback,
 ):
@@ -252,8 +255,8 @@ def _render_category_section(
 
     if category_count == 1:
         # 카테고리가 1개면 이미 10개씩 페이지네이션 된 상태
-        display_count = len(category_df)
-        st.markdown(f"*{display_count}개 상품*")
+        display_count = len(full_df[full_df["sub_category"] == category_name])
+        st.markdown(f"*총 {display_count}개 상품*")
         rows = category_df.reset_index(drop=True)
         current_cat_page = st.session_state.page
         total_cat_pages = 1
@@ -277,7 +280,8 @@ def _render_category_section(
 
         display_count = len(rows)
         st.markdown(
-            f"*{cat_start + 1}~{cat_start + display_count} / 총 {total_cat_items}개 상품*"
+            # f"*{cat_start + 1}~{cat_start + display_count} / 총 {total_cat_items}개 상품*"
+            f"*총 {total_cat_items}개 상품*"
         )
 
     # 상품 표시 (2열 그리드)

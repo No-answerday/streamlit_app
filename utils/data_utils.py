@@ -224,40 +224,28 @@ def apply_filters(
     # 검색 타입에 따른 필터링
     if search_text:
         s = search_text.strip()
+
+        keyword_series = filtered_df.get(
+            "top_keywords",
+            pd.Series([""] * len(filtered_df), index=filtered_df.index),
+        ).astype(str)
+        product_name_series = filtered_df["product_name"].astype(str)
+        brand_series = filtered_df["brand"].astype(str)
+
         if search_type == "상품명":
             # 상품명에만 검색
-            filtered_df = filtered_df[
-                filtered_df["product_name"]
-                .astype(str)
-                .str.contains(s, case=False, na=False, regex=False)
-            ]
+            mask = product_name_series.str.contains(s, case=False, na=False, regex=False)
+            
         elif search_type == "문맥":
             # 문맥 검색 (추후 구현 가능)
-            filtered_df = filtered_df[
-                filtered_df["product_name"]
-                .astype(str)
-                .str.contains(s, case=False, na=False, regex=False)
-                | filtered_df["brand"]
-                .astype(str)
-                .str.contains(s, case=False, na=False, regex=False)
-                | filtered_df.get("top_keywords", pd.Series([""] * len(filtered_df)))
-                .astype(str)
-                .str.contains(s, case=False, na=False, regex=False)
-            ]
+            mask = product_name_series.str.contains(s, case=False, na=False, regex=False) | brand_series.str.contains(s, case=False, na=False, regex=False) | keyword_series.str.contains(s, case=False, na=False, regex=False)
+
         else:  # 키워드 검색 (기본)
             # 키워드, 제품명, 브랜드 모두 검색
-            filtered_df = filtered_df[
-                filtered_df["product_name"]
-                .astype(str)
-                .str.contains(s, case=False, na=False, regex=False)
-                | filtered_df["brand"]
-                .astype(str)
-                .str.contains(s, case=False, na=False, regex=False)
-                | filtered_df.get("top_keywords", pd.Series([""] * len(filtered_df)))
-                .astype(str)
-                .str.contains(s, case=False, na=False, regex=False)
-            ]
+            mask = keyword_series.str.contains(s, case=False, na=False, regex=False) | brand_series.str.contains(s, case=False, na=False, regex=False) | product_name_series.str.contains(s, case=False, na=False, regex=False)
 
+        filtered_df = filtered_df[mask]
+        
     return filtered_df
 
 
