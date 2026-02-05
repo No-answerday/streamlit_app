@@ -265,6 +265,7 @@ def main():
     # 제품 상세 정보 (선택 시)
     # =========================
     if selected_product:
+        st.caption("🔒 상품 선택 상태에서는 검색 모드가 적용되지 않습니다. 재검색하려면 상품 선택을 취소해주세요.")
         with st.spinner("정보를 불러오는 중입니다..."):
             product_rows = df[df["product_name"] == selected_product]
 
@@ -523,32 +524,38 @@ def main():
         else:
             # 추천 상품 조회 및 출력
             with st.spinner("정보를 불러오는 중입니다..."):
-                # 검색 타입과 키워드 확인
-                search_type, search_keyword = get_search_info()
+                # # 검색 타입과 키워드 확인
+                # search_type, search_keyword = get_search_info()
 
-                # 문맥 검색 모드
-                if search_type == "문맥" and search_keyword:
-                    # BERTVectorizer가 이미 로드되어 있어야 함 (상단에서 처리)
-                    from services.bert_vectorizer import BERTVectorizer
+                # # 문맥 검색 모드
+                # if search_type == "문맥" and search_keyword:
+                #     # BERTVectorizer가 이미 로드되어 있어야 함 (상단에서 처리)
+                #     from services.bert_vectorizer import BERTVectorizer
 
-                    # 세션에 vectorizer가 없으면 로드
-                    if "vectorizer" not in st.session_state:
-                        st.session_state.vectorizer = BERTVectorizer(
-                            model_name="./models/fine_tuned/roberta_semantic_final"
-                        )
+                #     # 세션에 vectorizer가 없으면 로드
+                #     if "vectorizer" not in st.session_state:
+                #         st.session_state.vectorizer = BERTVectorizer(
+                #             model_name="./models/fine_tuned/roberta_semantic_final"
+                #         )
 
-                    reco_df_view = get_recommendations(
-                        df,
-                        selected_product=None,
-                        selected_categories=[selected_categories],
-                        query_text=search_keyword,
-                        vectorizer=st.session_state.vectorizer,
-                    )
-                else:
-                    # 일반 상품 추천 모드
-                    reco_df_view = get_recommendations(
-                        df, selected_product, [selected_categories]
-                    )
+                #     reco_df_view = get_recommendations(
+                #         df,
+                #         selected_product=None,
+                #         selected_categories=[selected_categories],
+                #         query_text=search_keyword,
+                #         vectorizer=st.session_state.vectorizer,
+                #     )
+                # else:
+                # 일반 상품 추천 모드
+                reco_df_view = get_recommendations(
+                    df, selected_product, [selected_categories]
+                )
+            # reco_score / similarity 컬럼 방어적 보정
+            if "reco_score" not in reco_df_view.columns:
+                reco_df_view["reco_score"] = 0.0
+
+            if "similarity" not in reco_df_view.columns:
+                reco_df_view["similarity"] = 0.0
 
             if sort_option == "추천순":
                 reco_df_view = reco_df_view.sort_values(

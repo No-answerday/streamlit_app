@@ -28,7 +28,11 @@ def get_recommendations(
     Returns:
         추천 상품 DataFrame (최대 6개)
     """
-    reco_df_view = pd.DataFrame()
+    # 스키마 고정용 빈 DF (점수는 있지만 값은 없음)
+    reco_df_view = df.iloc[0:0].copy()
+    reco_df_view["reco_score"] = pd.Series(dtype="float")
+    reco_df_view["similarity"] = pd.Series(dtype="float")
+    # reco_df_view = pd.DataFrame()
 
     # 문맥 검색 모드
     if query_text:
@@ -70,10 +74,10 @@ def get_recommendations(
             merged_df = df.merge(
                 tmp_reco_df[["product_id", "reco_score", "similarity"]],
                 on="product_id",
-                how="left",
+                how="inner",
             )
-            merged_df["reco_score"] = merged_df["reco_score"].fillna(0)
-            merged_df["similarity"] = merged_df["similarity"].fillna(0)
+            # merged_df["reco_score"] = merged_df["reco_score"].fillna(0)
+            # merged_df["similarity"] = merged_df["similarity"].fillna(0)
 
             if selected_categories:
                 merged_df = merged_df[
@@ -85,6 +89,8 @@ def get_recommendations(
                 .groupby("sub_category", group_keys=False)
                 .head(6)
             )
+        if not reco_list:
+            return reco_df_view
 
         return reco_df_view
 
