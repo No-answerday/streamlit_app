@@ -167,54 +167,84 @@ def main():
 
     # 문맥 검색일 때 미리 검색 수행
     if search_type_pre == "문맥" and search_keyword_pre:
-        # BERTVectorizer 로드 (services 폴더에서)
-        from services.bert_vectorizer import BERTVectorizer
+        try:
+            # BERTVectorizer 로드 (services 폴더에서)
+            from services.bert_vectorizer import BERTVectorizer
 
-        # 세션에 vectorizer가 없으면 로드
-        if "vectorizer" not in st.session_state:
-            with st.spinner("AI 모델을 로딩중입니다..."):
-                st.session_state.vectorizer = BERTVectorizer(
-                    model_name="./models/fine_tuned/roberta_semantic_final"
+            # 세션에 vectorizer가 없으면 로드
+            if "vectorizer" not in st.session_state:
+                with st.spinner("AI 모델을 로딩중입니다..."):
+                    # 모델 경로 확인
+                    import os
+
+                    model_path = "./models/fine_tuned/roberta_semantic_final"
+
+                    if not os.path.exists(model_path):
+                        st.error(
+                            "⚠️ 문맥 검색 모델을 찾을 수 없습니다.\n\n"
+                            "모델 파일이 필요합니다. 자세한 내용은 MODELS_README.md를 참조하세요."
+                        )
+                        st.session_state.vectorizer = None
+                    else:
+                        st.session_state.vectorizer = BERTVectorizer(
+                            model_name=model_path
+                        )
+
+            # vectorizer가 로드되지 않았으면 문맥 검색 건너뛰기
+            if st.session_state.vectorizer is None:
+                st.warning(
+                    "문맥 검색을 사용할 수 없습니다. 다른 검색 타입을 사용해주세요."
                 )
+            else:
+                # 캐시 키 확인 (같은 검색어면 재검색 안함)
+                cache_key = ("context_search", search_keyword_pre)
+                if st.session_state.get("context_search_cache_key") != cache_key:
+                    with st.spinner("문맥 검색 중..."):
+                        from services.recommend_similar_products import (
+                            recommend_similar_products,
+                        )
 
-        # 캐시 키 확인 (같은 검색어면 재검색 안함)
-        cache_key = ("context_search", search_keyword_pre)
-        if st.session_state.get("context_search_cache_key") != cache_key:
-            with st.spinner("문맥 검색 중..."):
-                from services.recommend_similar_products import (
-                    recommend_similar_products,
-                )
+                        reco_results = recommend_similar_products(
+                            query_text=search_keyword_pre,
+                            categories=None,
+                            top_n=5,  # 카테고리별 상위 5개
+                            vectorizer=st.session_state.vectorizer,
+                        )
 
-                reco_results = recommend_similar_products(
-                    query_text=search_keyword_pre,
-                    categories=None,
-                    top_n=5,  # 카테고리별 상위 5개
-                    vectorizer=st.session_state.vectorizer,
-                )
+                        # 결과를 product_name 리스트로 변환 (유사도 순)
+                        context_products = []
+                        if isinstance(reco_results, dict):
+                            for _, items in reco_results.items():
+                                context_products.extend(items)
+                            # reco_score 기준 정렬
+                            context_products.sort(
+                                key=lambda x: x.get("recommend_score", 0), reverse=True
+                            )
+                            context_search_results = [
+                                p["product_name"]
+                                for p in context_products
+                                if p.get("product_name")
+                            ]
 
-                # 결과를 product_name 리스트로 변환 (유사도 순)
-                context_products = []
-                if isinstance(reco_results, dict):
-                    for _, items in reco_results.items():
-                        context_products.extend(items)
-                    # reco_score 기준 정렬
-                    context_products.sort(
-                        key=lambda x: x.get("recommend_score", 0), reverse=True
+                        st.session_state["context_search_results"] = (
+                            context_search_results
+                        )
+                        st.session_state["context_search_products"] = (
+                            context_products  # 전체 결과 저장
+                        )
+                        st.session_state["context_search_cache_key"] = cache_key
+                else:
+                    context_search_results = st.session_state.get(
+                        "context_search_results", []
                     )
-                    context_search_results = [
-                        p["product_name"]
-                        for p in context_products
-                        if p.get("product_name")
-                    ]
+                    context_products = st.session_state.get(
+                        "context_search_products", []
+                    )
 
-                st.session_state["context_search_results"] = context_search_results
-                st.session_state["context_search_products"] = (
-                    context_products  # 전체 결과 저장
-                )
-                st.session_state["context_search_cache_key"] = cache_key
-        else:
-            context_search_results = st.session_state.get("context_search_results", [])
-            context_products = st.session_state.get("context_search_products", [])
+        except Exception as e:
+            st.error(f"문맥 검색 중 오류가 발생했습니다: {str(e)}")
+            st.info("다른 검색 타입(상품명 또는 키워드)을 사용해주세요.")
+            st.session_state.vectorizer = None
 
     # 검색창 (문맥 검색 결과 전달)
     selected_product = render_search_bar(
