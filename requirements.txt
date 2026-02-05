@@ -4,3 +4,7 @@ numpy
 pyarrow
 plotly
 awswrangler
+torch
+transformers
+huggingface_hub
+sentencepiece
