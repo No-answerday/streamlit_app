@@ -12,7 +12,13 @@ from utils import scroll
 from layouts.sidebar import sidebar
 
 # 컴포넌트 임포트
-from components.search_bar import render_search_bar, get_search_text, is_initial_state
+from components.search_bar import (
+    render_search_bar,
+    get_search_text,
+    get_search_type,
+    get_search_info,
+    is_initial_state,
+)
 from components.product_info import render_product_info
 from components.product_analysis import (
     render_top_keywords,
@@ -126,12 +132,13 @@ def main():
     ) = sidebar(df)
 
     st.set_page_config(
-    page_title="화장품 추천 대시보드",
-    page_icon="🎀",
-    layout="wide",
+        page_title="화장품 추천 대시보드",
+        page_icon="🎀",
+        layout="wide",
     )
 
-    st.markdown("""
+    st.markdown(
+        """
         <style>
         .info-icon {
             cursor: help;
@@ -142,14 +149,79 @@ def main():
         <span class="info-icon" title="다크 모드에서는 일부 UI가 정상적으로 표시되지 않을 수 있습니다. 원할한 이용을 위해 라이트 모드 사용을 권장합니다.">
         ⓘ
         </span>
-        """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
     # 메인 타이틀
     st.title("🎀 화장품 추천 대시보드")
     st.markdown("---")
 
-    # 검색창
-    selected_product = render_search_bar(product_options, clear_selected_product)
+    # =========================
+    # 문맥 검색 사전 처리
+    # =========================
+    context_search_results = None
+    context_search_df = None  # 문맥 검색 결과 DataFrame
+    search_type_pre = st.session_state.get("search_type", "상품명")
+    search_keyword_pre = st.session_state.get("search_keyword", "").strip()
+
+    # 문맥 검색일 때 미리 검색 수행
+    if search_type_pre == "문맥" and search_keyword_pre:
+        # BERTVectorizer 로드 (services 폴더에서)
+        from services.bert_vectorizer import BERTVectorizer
+
+        # 세션에 vectorizer가 없으면 로드
+        if "vectorizer" not in st.session_state:
+            with st.spinner("AI 모델을 로딩중입니다..."):
+                st.session_state.vectorizer = BERTVectorizer(
+                    model_name="./models/fine_tuned/roberta_semantic_final"
+                )
+
+        # 캐시 키 확인 (같은 검색어면 재검색 안함)
+        cache_key = ("context_search", search_keyword_pre)
+        if st.session_state.get("context_search_cache_key") != cache_key:
+            with st.spinner("문맥 검색 중..."):
+                from services.recommend_similar_products import (
+                    recommend_similar_products,
+                )
+
+                reco_results = recommend_similar_products(
+                    query_text=search_keyword_pre,
+                    categories=None,
+                    top_n=5,  # 카테고리별 상위 5개
+                    vectorizer=st.session_state.vectorizer,
+                )
+
+                # 결과를 product_name 리스트로 변환 (유사도 순)
+                context_products = []
+                if isinstance(reco_results, dict):
+                    for _, items in reco_results.items():
+                        context_products.extend(items)
+                    # reco_score 기준 정렬
+                    context_products.sort(
+                        key=lambda x: x.get("recommend_score", 0), reverse=True
+                    )
+                    context_search_results = [
+                        p["product_name"]
+                        for p in context_products
+                        if p.get("product_name")
+                    ]
+
+                st.session_state["context_search_results"] = context_search_results
+                st.session_state["context_search_products"] = (
+                    context_products  # 전체 결과 저장
+                )
+                st.session_state["context_search_cache_key"] = cache_key
+        else:
+            context_search_results = st.session_state.get("context_search_results", [])
+            context_products = st.session_state.get("context_search_products", [])
+
+    # 검색창 (문맥 검색 결과 전달)
+    selected_product = render_search_bar(
+        product_options,
+        clear_selected_product,
+        context_search_results=context_search_results,
+    )
     search_text = get_search_text()
     is_initial = is_initial_state(selected_sub_cat, selected_skin)
 
@@ -278,7 +350,12 @@ def main():
                     selected_category = None
 
         else:
-            # st.subheader("🌟 검색 결과")
+            # 문맥 검색일 때 다른 헤더 표시
+            search_type_header = st.session_state.get("search_type", "키워드")
+            if search_type_header == "문맥" and search_keyword_pre:
+                st.markdown("---")
+                st.subheader(f'🔍 문맥 검색 결과: "{search_keyword_pre}"')
+
             col_1, col_2 = st.columns([8, 2])
             with col_2:
                 sort_option = st.selectbox(
@@ -304,69 +381,144 @@ def main():
     else:
         if not selected_product:
             search_type = st.session_state.get("search_type", "키워드")
-            filtered_df = apply_filters(
-                df,
-                selected_sub_cat,
-                selected_skin,
-                min_rating,
-                max_rating,
-                min_price,
-                max_price,
-                search_text,
-                search_type,
-            )
 
-            # 정렬 적용
-            search_df_view = sort_products(filtered_df, sort_option)
+            # 문맥 검색일 때는 벡터 유사도 결과 사용
+            if search_type == "문맥" and search_keyword_pre:
+                # 문맥 검색 결과에서 DataFrame 생성
+                context_products = st.session_state.get("context_search_products", [])
 
-            # 페이지네이션 계산
-            items_page, total_pages, category_count = calculate_pagination(
-                search_df_view, selected_product
-            )
-            init_page_state(total_pages)
+                if context_products:
+                    # product_id 리스트 추출
+                    product_ids = [
+                        p["product_id"] for p in context_products if p.get("product_id")
+                    ]
 
-            # 필터 변경 감지
-            check_filter_change(
-                search_text,
-                selected_sub_cat,
-                selected_skin,
-                min_rating,
-                max_rating,
-                min_price,
-                max_price,
-                sort_option,
-                safe_scroll_to_top,
-            )
+                    # df에서 해당 상품들만 필터링
+                    search_df_view = df[df["product_id"].isin(product_ids)].copy()
 
-            # 페이지 슬라이스
-            page_df = get_page_slice(
-                search_df_view, selected_product, items_page, category_count
-            )
+                    # reco_score와 similarity 추가
+                    score_map = {
+                        p["product_id"]: p.get("recommend_score", 0)
+                        for p in context_products
+                    }
+                    sim_map = {
+                        p["product_id"]: p.get("cosine_similarity", 0)
+                        for p in context_products
+                    }
 
-            # =========================
-            # 상품 출력
-            # =========================
-            if page_df.empty:
-                st.warning("표시할 상품이 없어요.🥺")
+                    search_df_view["reco_score"] = search_df_view["product_id"].map(
+                        score_map
+                    )
+                    search_df_view["similarity"] = search_df_view["product_id"].map(
+                        sim_map
+                    )
+
+                    # 추천 점수 순으로 정렬
+                    search_df_view = search_df_view.sort_values(
+                        "reco_score", ascending=False
+                    )
+
+                    # 문맥 검색 결과 직접 렌더링
+                    if search_df_view.empty:
+                        st.warning("표시할 상품이 없어요.🥺")
+                    else:
+                        # 카테고리별로 그룹화하여 표시
+                        render_search_results_grid(
+                            page_df=search_df_view,
+                            full_df=search_df_view,
+                            category_count=search_df_view["sub_category"].nunique(),
+                            on_select_callback=select_product_from_reco,
+                        )
+                else:
+                    st.warning("표시할 상품이 없어요.🥺")
             else:
-                render_search_results_grid(
-                    page_df=page_df,
-                    full_df=search_df_view,
-                    category_count=category_count,
-                    on_select_callback=select_product_from_reco,
+                # 기존 필터 기반 검색
+                filtered_df = apply_filters(
+                    df,
+                    selected_sub_cat,
+                    selected_skin,
+                    min_rating,
+                    max_rating,
+                    min_price,
+                    max_price,
+                    search_text,
+                    search_type,
                 )
+
+                # 정렬 적용
+                search_df_view = sort_products(filtered_df, sort_option)
+
+                # 페이지네이션 계산
+                items_page, total_pages, category_count = calculate_pagination(
+                    search_df_view, selected_product
+                )
+                init_page_state(total_pages)
+
+                # 필터 변경 감지
+                check_filter_change(
+                    search_text,
+                    selected_sub_cat,
+                    selected_skin,
+                    min_rating,
+                    max_rating,
+                    min_price,
+                    max_price,
+                    sort_option,
+                    safe_scroll_to_top,
+                )
+
+                # 페이지 슬라이스
+                page_df = get_page_slice(
+                    search_df_view, selected_product, items_page, category_count
+                )
+
                 # =========================
-                # 페이지네이션
+                # 상품 출력
                 # =========================
-                show_pagination = selected_product or selected_sub_cat
-                if show_pagination and total_pages > 1:
-                    render_pagination(total_pages, safe_scroll_to_top)
+                if page_df.empty:
+                    st.warning("표시할 상품이 없어요.🥺")
+                else:
+                    render_search_results_grid(
+                        page_df=page_df,
+                        full_df=search_df_view,
+                        category_count=category_count,
+                        on_select_callback=select_product_from_reco,
+                    )
+                    # =========================
+                    # 페이지네이션
+                    # =========================
+                    show_pagination = selected_product or selected_sub_cat
+                    if show_pagination and total_pages > 1:
+                        render_pagination(total_pages, safe_scroll_to_top)
         else:
             # 추천 상품 조회 및 출력
             with st.spinner("정보를 불러오는 중입니다..."):
-                reco_df_view = get_recommendations(
-                    df, selected_product, [selected_categories]
-                )
+                # 검색 타입과 키워드 확인
+                search_type, search_keyword = get_search_info()
+
+                # 문맥 검색 모드
+                if search_type == "문맥" and search_keyword:
+                    # BERTVectorizer가 이미 로드되어 있어야 함 (상단에서 처리)
+                    from services.bert_vectorizer import BERTVectorizer
+
+                    # 세션에 vectorizer가 없으면 로드
+                    if "vectorizer" not in st.session_state:
+                        st.session_state.vectorizer = BERTVectorizer(
+                            model_name="./models/fine_tuned/roberta_semantic_final"
+                        )
+
+                    reco_df_view = get_recommendations(
+                        df,
+                        selected_product=None,
+                        selected_categories=[selected_categories],
+                        query_text=search_keyword,
+                        vectorizer=st.session_state.vectorizer,
+                    )
+                else:
+                    # 일반 상품 추천 모드
+                    reco_df_view = get_recommendations(
+                        df, selected_product, [selected_categories]
+                    )
 
             if sort_option == "추천순":
                 reco_df_view = reco_df_view.sort_values(
@@ -378,7 +530,8 @@ def main():
 
             render_recommendations_grid(reco_df_view, select_product_from_reco)
 
-    st.markdown("""
+    st.markdown(
+        """
         <style>
         .footer {
             font-size: 12px;
@@ -392,7 +545,9 @@ def main():
             <br><br><br>
             ⓒ 2026 Team Tensor · Multicampus team project
         </div>
-        """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
     # CSS 적용
     css.set_css()
