@@ -5,6 +5,12 @@ import glob
 from typing import List, Optional, Dict, Any
 from services.athena_queries import load_products_data_from_athena
 
+# BERTVectorizer 로드 (미세조정된 모델 사용)
+import sys
+
+sys.path.append("./services")
+from bert_vectorizer import BERTVectorizer
+
 
 def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
     if vec1 is None or vec2 is None:
@@ -84,29 +90,35 @@ def load_products_data(
 
 def recommend_similar_products(
     product_id: Optional[str] = None,
+    query_text: Optional[str] = None,
     categories: Optional[List[str]] = None,
     top_n: int = 10,
     processed_data_dir: str = "./data/processed_data",
     vector_type: str = "roberta_semantic",
     exclude_self: bool = True,
+    vectorizer=None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
-    유사 상품 추천 또는 전체 상품 랭킹
+    유사 상품 추천, 문맥 검색, 전체 랭킹
 
     점수 계산 방식:
-    - product_id가 있을 때 (유사 상품 추천):
+    - product_id가 있을 때 (유사 상품 추천 - roberta_sentiment 벡터 사용):
       점수 = 유사도 * 0.5 + 긍정확률 * 0.3 + 정규화_평점 * 0.2
-    - product_id가 None일 때 (전체 랭킹):
+    - query_text가 있을 때 (문맥 검색 - roberta_semantic 벡터 사용):
+      점수 = (유사도^2) * 0.95 + 긍정확률 * 0.03 + 정규화_평점 * 0.02 (유사도 지수적 강화)
+    - 둘 다 None일 때 (전체 랭킹):
       점수 = 긍정확률 * 0.6 + 정규화_평점 * 0.4
     - 정규화_평점 = 평균평점 / 5.0
 
     Args:
         product_id: 기준 상품 ID (예: "로션_1"), None이면 전체 랭킹
+        query_text: 검색 문장 (예: "촉촉하고 하얗지 않은 선크림")
         categories: 검색할 카테고리 리스트 (None이면 모든 카테고리)
         top_n: 반환할 추천 상품 개수 (카테고리별)
         processed_data_dir: processed_data 디렉토리 경로
         vector_type: 사용할 벡터 타입
-        exclude_self: 자기 자신을 결과에서 제외할지 여부
+        exclude_self: 자기 자신을 결과에서 제외할지 여부 (product_id 모드에만 적용)
+        vectorizer: BERTVectorizer 인스턴스 (query_text 사용 시 필요)
 
     Returns:
         Dict[str, List[Dict]]: 카테고리별 추천 상품 딕셔너리
@@ -128,7 +140,11 @@ def recommend_similar_products(
                 ...
             }
     """
-    # 1. 모든 상품 데이터 로드
+    # 1. product_id와 query_text 동시 사용 불가
+    if product_id is not None and query_text is not None:
+        raise ValueError("product_id와 query_text를 동시에 사용할 수 없습니다.")
+
+    # 2. 모든 상품 데이터 로드
     print(f"상품 데이터 로드 중... (카테고리: {categories or '전체'})")
     all_products = load_products_data_from_athena(
         categories=categories, vector_type=vector_type
@@ -140,13 +156,16 @@ def recommend_similar_products(
 
     print(f"✓ {len(all_products):,}개 상품 로드 완료")
 
-    # 2. product_id 유무에 따라 분기 처리
+    # 3. 모드에 따라 분기 처리
     target_vector = None
     target_product_name = None
+    weights = None  # [유사도, 긍정확률, 정규화평점]
+    is_semantic_search = False  # 문맥 검색 여부
 
     if product_id is not None:
-        # 유사 상품 추천 모드
+        # 모드 1: 유사 상품 추천 (roberta_sentiment 벡터 사용)
         print(f"\n[모드] 유사 상품 추천 (product_id={product_id})")
+        print("감성 분석 기반 roberta_sentiment 벡터 사용")
 
         # 기준 상품 찾기
         target_product = all_products[all_products["product_id"] == product_id]
@@ -166,20 +185,62 @@ def recommend_similar_products(
             print(f"[오류] 상품 '{product_id}'의 벡터가 없습니다.")
             return {}
 
+        weights = [0.5, 0.3, 0.2]
         print(f"✓ 기준 상품: {target_product_name}")
         print("점수 = 유사도 * 0.5 + 긍정확률 * 0.3 + 정규화_평점 * 0.2")
+
+    elif query_text is not None:
+        # 모드 2: 문맥 검색 (roberta_semantic 벡터 사용)
+        print(f"\n[모드] 문맥 검색 (query='{query_text}')")
+        print("문맥 파악용 roberta_semantic 벡터 사용")
+
+        if vectorizer is None:
+            raise ValueError(
+                "query_text를 사용하려면 vectorizer 파라미터가 필요합니다. "
+                "roberta_semantic_final 모델로 초기화된 BERTVectorizer 인스턴스를 전달하세요."
+            )
+
+        # 쿼리를 벡터로 변환 (roberta_semantic 모델 사용)
+        print("쿼리 벡터화 중... (roberta_semantic 모델)")
+        target_vector = vectorizer.encode(query_text)
+
+        # Semantic 벡터 컬럼으로 변경
+        vector_col = f"product_vector_roberta_semantic"
+        if vector_col not in all_products.columns:
+            raise ValueError(
+                f"'{vector_col}' 컬럼이 존재하지 않습니다. "
+                f"semantic_vectorize.py를 먼저 실행하세요."
+            )
+
+        is_semantic_search = True
+        weights = [
+            0.95,
+            0.03,
+            0.02,
+        ]  # 문맥 검색 시 유사도 비중 극대화 (유사도 제곱 적용)
+        target_product_name = query_text
+        print(f"✓ 검색 쿼리: {query_text}")
+        print(
+            "점수 = (유사도^2) * 0.95 + 긍정확률 * 0.03 + 정규화_평점 * 0.02 (유사도 지수적 강화)"
+        )
+
     else:
-        # 전체 랭킹 모드
+        # 모드 3: 전체 랭킹 (유사도 없음)
         print(f"\n[모드] 전체 상품 랭킹")
+        weights = [0.0, 0.6, 0.4]
         print("점수 = 긍정확률 * 0.6 + 정규화_평점 * 0.4")
 
-    # 3. 모든 상품과 비교하여 점수 계산
+    # 4. 모든 상품과 비교하여 점수 계산
     print(f"\n점수 계산 중...")
     results = []
-    vector_col = f"product_vector_{vector_type}"
+    vector_col = (
+        f"product_vector_{vector_type}"
+        if product_id is not None
+        else "product_vector_roberta_semantic"
+    )
 
     for idx, product in all_products.iterrows():
-        # 자기 자신 제외 (옵션)
+        # 자기 자신 제외 (옵션, product_id 모드에만 적용)
         if (
             exclude_self
             and product_id is not None
@@ -198,8 +259,8 @@ def recommend_similar_products(
             avg_rating = 0
         normalized_rating = avg_rating / 5.0
 
-        if product_id is not None:
-            # 유사 상품 추천 모드: 유사도 계산 필요
+        if target_vector is not None:
+            # 유사 상품 추천 또는 문맥 검색 모드: 유사도 계산 필요
             product_vector = product[vector_col]
 
             # 벡터가 없으면 스킵
@@ -212,16 +273,27 @@ def recommend_similar_products(
             # 코사인 유사도 계산
             similarity = cosine_similarity(target_vector, product_vector)
 
-            # 최종 점수 = 유사도 * 0.5 + 긍정확률 * 0.3 + 정규화_평점 * 0.2
-            recommend_score = (
-                similarity * 0.5 + sentiment * 0.3 + normalized_rating * 0.2
-            )
+            # 최종 점수 계산 (가중치 적용)
+            if is_semantic_search:
+                # 문맥 검색 시 유사도를 제곱하여 지수적으로 강화
+                recommend_score = (
+                    (similarity**2) * weights[0]
+                    + sentiment * weights[1]
+                    + normalized_rating * weights[2]
+                )
+            else:
+                # 유사 상품 추천
+                recommend_score = (
+                    similarity * weights[0]
+                    + sentiment * weights[1]
+                    + normalized_rating * weights[2]
+                )
         else:
             # 전체 랭킹 모드: 유사도 불필요
             similarity = None
 
             # 최종 점수 = 긍정확률 * 0.6 + 정규화_평점 * 0.4
-            recommend_score = sentiment * 0.6 + normalized_rating * 0.4
+            recommend_score = sentiment * weights[1] + normalized_rating * weights[2]
 
         # 결과 저장
         result = {
@@ -246,7 +318,7 @@ def recommend_similar_products(
 
         results.append(result)
 
-    # 4. 카테고리별로 그룹화
+    # 5. 카테고리별로 그룹화
     from collections import defaultdict
 
     category_results = defaultdict(list)
@@ -360,7 +432,7 @@ if __name__ == "__main__":
 
     # 예시 3: 상품 미입력 (필터링된것중 전체 랭킹)
     print("\n\n" + "=" * 100)
-    print("예시 3: 모든 카테고리에서 유사 상품 추천")
+    print("예시 3: 상품 미입력시 전체 랭킹")
     print("=" * 100)
 
     results = recommend_similar_products(
@@ -371,15 +443,29 @@ if __name__ == "__main__":
 
     print_recommendations(results)
 
-    print("results\n", results)
+    # 예시 4: 문맥 검색 (BERTVectorizer 필요 - Semantic 모델)
+    print("\n\n" + "=" * 100)
+    print("예시 4: 문맥 검색 (Semantic 벡터 사용)")
+    print("=" * 100)
+
+    vectorizer = BERTVectorizer(model_name="./models/fine_tuned/roberta_semantic_final")
+
+    results = recommend_similar_products(
+        query_text="지성 피부에 좋은 기름지지 않은 묽은 로션",
+        categories=None,
+        top_n=5,
+        vectorizer=vectorizer,
+    )
+
+    print_recommendations(results)
 
     print("\n\n" + "=" * 100)
 
-    for category, items in results.items():
-        print(f"\nCategory: {category}")
-        for item in items:
-            print(
-                f"  - {item['product_id']}: Score={item['recommend_score']:.3f}, "
-                f"Sentiment={item['sentiment_score']:.3f}, "
-                f"Avg Rating={item['avg_rating']:.1f}"
-            )
+    results = recommend_similar_products(
+        query_text="건성 피부에 좋은 기름지고 꾸덕한 로션",
+        categories=None,
+        top_n=5,
+        vectorizer=vectorizer,
+    )
+
+    print_recommendations(results)
