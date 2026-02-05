@@ -8,7 +8,12 @@ import numpy as np
 import re
 
 from utils.load_data import make_df
-from services.athena_queries import fetch_all_products, fetch_reviews_by_product
+from services.athena_queries import fetch_all_products, fetch_reviews_by_product, fetch_top_reviews_text
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_top_reviews_athena(product_id: str, limit: int = 5) -> pd.DataFrame:
+    """Athena에서 리뷰 텍스트 N개 로드"""
+    return fetch_top_reviews_text(product_id, limit=limit)
 
 # 메인 카테고리 목록
 MAIN_CATS = [

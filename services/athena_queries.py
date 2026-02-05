@@ -172,3 +172,16 @@ def fetch_representative_review_text(product_id: str, review_id: int):
     LIMIT 1
     """
     return athena_read(sql)
+
+
+def fetch_top_reviews_text(product_id: str, limit: int = 5):
+    """상품별 최신 리뷰 텍스트 N개만 가져오기"""
+    pid = str(product_id).replace("'", "''")
+    sql = f"""
+    SELECT id, full_text, title, content, score, date
+    FROM coupang_db.reviews_v3
+    WHERE product_id = '{pid}'
+    ORDER BY date DESC
+    LIMIT {int(limit)}
+    """
+    return athena_read(sql)

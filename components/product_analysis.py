@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.load_data import rating_trend
 from services.athena_queries import fetch_representative_review_text
-from utils.data_utils import load_reviews_athena
+from utils.data_utils import load_reviews_athena, load_top_reviews_athena
 from services.recommend_similar_products import recommend_similar_products
 
 
@@ -24,18 +24,70 @@ def render_top_keywords(product_info: pd.Series):
     st.write(top_kw if top_kw else "-")
 
 
-def render_representative_review(container, result):
+def render_representative_review(container, reviews_df: pd.DataFrame, skip_scroll_callback):
     """대표 리뷰 렌더링"""
     with container.container():
         st.markdown("### ✒️ 대표 리뷰")
-        if not result.empty and "full_text" in result.columns:
-            text = result.iloc[0]["full_text"]
-            if text:
-                st.text(text)
-            else:
-                st.info("대표 리뷰가 없습니다.")
-        else:
+
+        if reviews_df is None or reviews_df.empty:
             st.info("대표 리뷰가 없습니다.")
+            return
+
+        # 페이지 상태 키
+        pid = st.session_state.get("_analysis_cache_product_id", "unknown")
+        page_key = f"rep_review_page_{pid}"
+
+        if page_key not in st.session_state:
+            st.session_state[page_key] = 0
+
+        total = len(reviews_df)
+        page = int(st.session_state[page_key])
+        page = max(0, min(page, total - 1))
+        st.session_state[page_key] = page
+
+        # 현재 페이지 리뷰 표시
+        row = reviews_df.iloc[page]
+
+        meta = []
+        if "date" in reviews_df.columns and pd.notna(row.get("date")):
+            meta.append(str(row.get("date")))
+        if "score" in reviews_df.columns and pd.notna(row.get("score")):
+            meta.append(f"평점 {row.get('score')}")
+        if meta:
+            st.caption(" · ".join(meta))
+
+        # full_text 우선, 없으면 title+content
+        text = ""
+        if "full_text" in reviews_df.columns and pd.notna(row.get("full_text")):
+            text = str(row.get("full_text") or "")
+        if not text:
+            title = str(row.get("title") or "") if "title" in reviews_df.columns else ""
+            content = str(row.get("content") or "") if "content" in reviews_df.columns else ""
+            text = (title + "\n\n" + content).strip()
+
+        if text:
+            st.text(text)
+        else:
+            st.info("표시할 리뷰 텍스트가 없습니다.")
+        
+        # 페이지네이션
+        col_l, col_m, col_r = st.columns([2, 6, 2])
+
+        def prev_page():
+            skip_scroll_callback()
+            st.session_state[page_key] = max(0, st.session_state[page_key] - 1)
+
+        def next_page():
+            skip_scroll_callback()
+            st.session_state[page_key] = min(total - 1, st.session_state[page_key] + 1)
+
+        with col_l:
+            st.button("◀ 이전", on_click=prev_page, disabled=(page == 0), use_container_width=True, key=f"rep_prev_{pid}",)
+        with col_m:
+            st.markdown(f"<div style='text-align:center; padding-top:6px;'>({page+1} / {total})</div>", unsafe_allow_html=True)
+        with col_r:
+            st.button("다음 ▶", on_click=next_page, disabled=(page >= total - 1), use_container_width=True, key=f"rep_next_{pid}",)
+        
 
 
 def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callback):
@@ -63,6 +115,15 @@ def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callbac
         min_date = review_df["date"].min().date()
         max_date = review_df["date"].max().date()
 
+        # product_id + 렌더 카운터
+        pid = st.session_state.get("_analysis_cache_product_id", "unknown")
+        render_key = st.session_state.get("_rating_render_key", 0)
+        st.session_state["_rating_render_key"] = render_key + 1
+
+        freq_key = f"rating_freq_{pid}_{render_key}"
+        date_key = f"rating_date_{pid}_{render_key}"
+        reset_key = f"rating_reset_{pid}_{render_key}"
+
         col_left, col_mid, col_right, _ = st.columns([1, 1, 1, 1])
 
         with col_left:
@@ -70,7 +131,7 @@ def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callbac
                 "평균 기준",
                 ["일간", "주간", "월간"],
                 index=2,
-                key="rating_freq_label",
+                key=freq_key,
                 on_change=skip_scroll_callback,
             )
 
@@ -90,7 +151,7 @@ def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callbac
                 value=default_date_range,
                 min_value=min_date,
                 max_value=max_date,
-                key=DATE_RANGE_KEY,
+                key=date_key,
                 on_change=skip_scroll_callback,
             )
 
@@ -102,7 +163,7 @@ def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callbac
             st.markdown("<br>", unsafe_allow_html=True)
             st.button(
                 "↺",
-                key="reset_date",
+                key=reset_key,
                 help="날짜 초기화",
                 on_click=reset_date_range,
             )
@@ -187,10 +248,8 @@ def load_product_analysis_async(
         future_to_type = {}
 
         # 1. 대표 리뷰 요청
-        if product_id and pd.notna(review_id):
-            f_rep = executor.submit(
-                fetch_representative_review_text, str(product_id), int(review_id)
-            )
+        if product_id:
+            f_rep = executor.submit(load_top_reviews_athena, str(product_id), 5)
             future_to_type[f_rep] = "REVIEW"
 
         # 2. 평점 추이 데이터 요청
@@ -216,9 +275,9 @@ def load_product_analysis_async(
                 result = future.result()
 
                 if task_type == "REVIEW":
-                    st.session_state["_rep_review_df_cache"] = result
+                    st.session_state["_rep_reviews_df_cache"] = result
                     st.session_state["_analysis_cache_product_id"] = str(product_id)
-                    render_representative_review(container_review, result)
+                    render_representative_review(container_review, result, skip_scroll_callback)
 
                 elif task_type == "TREND":
                     st.session_state["_reviews_df_cache"] = result
