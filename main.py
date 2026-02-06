@@ -387,12 +387,19 @@ def main():
                         else 0
                     )
 
+                    def on_category_change():
+                        """추천 카테고리 변경 시 캐시 무효화"""
+                        # 캐시 키를 초기화하여 새로운 카테고리로 재검색
+                        st.session_state["reco_cache_key"] = None
+                        st.session_state["reco_cache"] = []
+
                     selected_categories = st.selectbox(
                         "",
                         all_categories,
                         index=default_index,
                         key="reco_category_select",
                         label_visibility="collapsed",
+                        on_change=on_category_change,
                     )
 
                 else:
