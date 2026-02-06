@@ -82,7 +82,7 @@ def render_search_result_card(
         col_image, col_info = st.columns([3, 7])
 
         with col_image:
-            st.image(image_url, width=200)
+            st.image(row["image_url"], width=200)
 
         with col_info:
             badge_html = ""

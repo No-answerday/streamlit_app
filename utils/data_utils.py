@@ -73,48 +73,7 @@ def load_top_reviews_athena(
     return result
 
 
-# 메인 카테고리 목록
-MAIN_CATS = [
-    "스킨케어",
-    "클렌징/필링",
-    "선케어/태닝",
-    "메이크업",
-    "헤어/바디",
-    "바디",
-]
-
 DEFAULT_IMAGE_URL = "https://tr.rbxcdn.com/180DAY-981c49e917ba903009633ed32b3d0ef7/420/420/Hat/Webp/noFilter"
-
-
-def norm_cat(path: str) -> str:
-    """카테고리 경로 정규화"""
-    if not isinstance(path, str):
-        return ""
-
-    # 불필요한 prefix 제거
-    remove_prefixes = ["쿠팡 홈", "쿠팡홈", "R.LUX", "뷰티", "전체", "화장품"]
-    parts = [p.strip() for p in path.split(">")]
-
-    # prefix 제거
-    filtered_parts = [p for p in parts if p not in remove_prefixes]
-
-    # MAIN_CATS에서 찾기
-    for i, part in enumerate(filtered_parts):
-        for main in MAIN_CATS:
-            if part == main:
-                return " > ".join(filtered_parts[i:])
-    return ""
-
-
-def split_category(path: str) -> tuple:
-    """카테고리 경로를 main/middle/sub로 분리"""
-    if not isinstance(path, str):
-        return "", "", ""
-    parts = [p.strip() for p in path.split(">")]
-    main = parts[0] if len(parts) >= 1 else ""
-    middle = parts[1] if len(parts) >= 2 else ""
-    sub = parts[-1] if len(parts) >= 3 else (parts[-1] if parts else "")
-    return main, middle, sub
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -133,27 +92,90 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """UI에서 사용할 컬럼들 정규화 및 매핑"""
     df = df.copy()
 
+    SUB_ALIAS = {
+        "알로에/수딩/에프터선": "알로에/수딩/애프터선",
+        "립메이크업/포인트리무버": "리무버",
+        "립/아이리무버": "리무버",
+    }
+
     # 카테고리 정규화
-    if "category_path_norm" not in df.columns:
-        if "category_path" in df.columns:
-            df["category_path_norm"] = df["category_path"].apply(norm_cat)
-        elif "path" in df.columns:
-            df["category_path_norm"] = df["path"].apply(norm_cat)
-        elif "category" in df.columns:
-            df["category_path_norm"] = (
-                df["category"].astype(str).str.replace("_", "/", regex=False)
-            )
-        else:
-            df["category_path_norm"] = ""
+    def normalize_sub_category(x: str) -> str:
+        if not isinstance(x, str):
+            return ""
+        x = x.strip()
+        x = x.replace("_", "/")
+        x = re.sub(r"\s+", "", x)
+        x = SUB_ALIAS.get(x, x)
+        return x
 
-    # main/middle/sub 카테고리 분리
-    if "main_category" not in df.columns:
-        df[["main_category", "middle_category", "sub_category"]] = (
-            df["category_path_norm"].apply(split_category).apply(pd.Series)
-        )
+    # main/middle/sub 매핑
+    MAIN_TO_MIDDLES = {
+        "메이크업": ["립메이크업", "바디메이크업", "베이스메이크업", "아이메이크업", "치크메이크업"],
+        "선케어/태닝": ["선케어/태닝"],
+        "스킨케어": ["스킨케어"],
+        "클렌징/필링": ["클렌징/필링"],
+    }
 
-    if "sub_category" not in df.columns:
-        df["sub_category"] = df["category"] if "category" in df.columns else ""
+    MIDDLE_TO_SUBS = {
+        "립메이크업": ["립스틱", "립케어", "틴트/립글로스"],
+        "바디메이크업": ["바디메이크업", "헤나/타투스티커"],
+        "베이스메이크업": ["메이크업픽서", "베이스/프라이머", "컨실러", "쿠션/팩트", "파우더/파우더팩트","파운데이션", "BB/CC크림/톤업크림"],
+        "아이메이크업": ["마스카라", "아이라이너", "아이메이크업/포인트리무버", "아이브로우","아이섀도", "아이팔레트"],
+        "치크메이크업": ["블러셔", "하이라이터"],
+        "선케어/태닝": ["선스틱", "선스프레이", "선케어/선크림/선로션", "선쿠션/선팩트", "알로에/수딩/애프터선", "자외선차단패치", "태닝오일"],
+        "스킨케어": ["기초세트", "로션", "미스트", "스킨", "에센스/세럼/앰플", "오일","멀티밤/스틱", "아이/넥크림", "올인원", "페이셜크림"],
+        "클렌징/필링": ["리무버", "스크럽/필링", "클렌징밤/크림/로션", "클렌징비누","클렌징세트", "클렌징오일", "클렌징워터", "클렌징젤/파우더", "클렌징티슈/시트", "클렌징폼"],
+    }
+
+    def category_mapping():
+        sub_to_middle = {}
+        for middle, subs in MIDDLE_TO_SUBS.items():
+            for sub in subs:
+                sub_norm = normalize_sub_category(sub)
+                sub_to_middle[sub_norm] = middle
+
+        middle_to_main = {}
+        for main, middles in MAIN_TO_MIDDLES.items():
+            for middle in middles:
+                middle_to_main[middle] = main
+
+        sub_to_main = {}
+        for sub_norm, middle in sub_to_middle.items():
+            sub_to_main[sub_norm] = middle_to_main.get(middle, "")
+
+        return sub_to_main, sub_to_middle
+
+    SUB_TO_MAIN, SUB_TO_MIDDLE = category_mapping()
+
+    if "category" in df.columns:
+        df["sub_category"] = df["category"].apply(normalize_sub_category)
+    else:
+        df["sub_category"] = ""
+
+    df["middle_category"] = df["sub_category"].map(SUB_TO_MIDDLE).fillna("")
+    df["main_category"] = df["sub_category"].map(SUB_TO_MAIN).fillna("")
+
+    # 매핑 실패 -> 기타 카테고리
+    unknown_mask = df["main_category"].eq("") & df["sub_category"].ne("")
+
+    df.loc[unknown_mask, "main_category"] = "기타"
+    df.loc[unknown_mask, "middle_category"] = "기타"
+
+    # category가 비어있는 경우
+    empty_mask = df["sub_category"].eq("")
+    df.loc[empty_mask, "main_category"] = "기타"
+    df.loc[empty_mask, "middle_category"] = "기타"
+    df.loc[empty_mask, "sub_category"] = "기타"
+
+    # 카테고리 경로
+    df["category_path_norm"] = np.where(
+        df["main_category"].astype(str).str.strip() == df["middle_category"].astype(str).str.strip(),
+        df["main_category"].astype(str).str.strip() + " > " + df["sub_category"].astype(str).str.strip(),
+        df["main_category"].astype(str).str.strip() + " > " + df["middle_category"].astype(str).str.strip() + " > " + df["sub_category"].astype(str).str.strip(),
+    )
+
+    mask_unknown = df["main_category"].eq("")
+    df.loc[mask_unknown, "category_path_norm"] = ""
 
     # 평점 컬럼
     if "score" not in df.columns and "avg_rating_with_text" in df.columns:
