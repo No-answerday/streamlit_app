@@ -144,11 +144,36 @@ def recommend_similar_products(
     if product_id is not None and query_text is not None:
         raise ValueError("product_id와 query_text를 동시에 사용할 수 없습니다.")
 
-    # 2. 모든 상품 데이터 로드
-    print(f"상품 데이터 로드 중... (카테고리: {categories or '전체'})")
-    all_products = load_products_data_from_athena(
-        categories=categories, vector_type=vector_type
-    )
+    # 2. 상품 데이터 로드
+    # product_id 모드일 때는 전체 데이터에서 기준 상품을 찾고,
+    # 추천 결과만 categories로 필터링
+    if product_id is not None:
+        # 기준 상품은 전체 데이터에서 찾기
+        print(f"기준 상품 로드 중... (product_id={product_id})")
+        base_products = load_products_data_from_athena(
+            categories=None, vector_type=vector_type
+        )
+        
+        target_product = base_products[base_products["product_id"] == product_id]
+        
+        if target_product.empty:
+            print(f"[오류] 상품 ID '{product_id}'를 찾을 수 없습니다.")
+            return {}
+        
+        target_product = target_product.iloc[0]
+        print(f"✓ 기준 상품: {target_product.get('product_name', product_id)}")
+        
+        # 비교 대상 상품은 categories로 필터링
+        print(f"비교 대상 상품 로드 중... (카테고리: {categories or '전체'})")
+        all_products = load_products_data_from_athena(
+            categories=categories, vector_type=vector_type
+        )
+    else:
+        # query_text나 전체 랭킹 모드는 기존대로
+        print(f"상품 데이터 로드 중... (카테고리: {categories or '전체'})")
+        all_products = load_products_data_from_athena(
+            categories=categories, vector_type=vector_type
+        )
 
     if all_products.empty:
         print("[경고] 상품 데이터를 찾을 수 없습니다.")
@@ -167,14 +192,7 @@ def recommend_similar_products(
         print(f"\n[모드] 유사 상품 추천 (product_id={product_id})")
         print("감성 분석 기반 roberta_sentiment 벡터 사용")
 
-        # 기준 상품 찾기
-        target_product = all_products[all_products["product_id"] == product_id]
-
-        if target_product.empty:
-            print(f"[오류] 상품 ID '{product_id}'를 찾을 수 없습니다.")
-            return {}
-
-        target_product = target_product.iloc[0]
+        # target_product는 이미 위에서 찾음
         target_product_name = target_product.get("product_name", product_id)
         vector_col = f"product_vector_{vector_type}"
         target_vector = target_product[vector_col]

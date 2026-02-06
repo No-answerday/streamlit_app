@@ -108,6 +108,84 @@ def select_product_from_reco(product_name: str):
     safe_scroll_to_top()
 
 
+@st.fragment
+def render_recommendation_section(df: pd.DataFrame, selected_product: str):
+    """추천 상품 섹션 렌더링 (fragment)"""
+    st.markdown("---")
+    st.subheader("👍 이 상품과 유사한 추천 상품")
+
+    col_1, col_2, col_3 = st.columns([5, 2, 3])
+
+    with col_2:
+        sort_option = st.selectbox(
+            "정렬 옵션",
+            options=[
+                "추천순",
+                "평점 높은 순",
+                "리뷰 많은 순",
+                "가격 낮은 순",
+                "가격 높은 순",
+            ],
+            index=0,
+            key="reco_sort_option",
+            label_visibility="collapsed",
+        )
+
+    with col_3:
+        all_categories = sorted(
+            c for c in df["sub_category"].unique() if isinstance(c, str) and c.strip()
+        )
+
+        # 현재 선택된 상품 카테고리
+        current_category = (
+            df.loc[df["product_name"] == selected_product, "sub_category"].iloc[0]
+            if selected_product in df["product_name"].values
+            else None
+        )
+
+        # 디폴트
+        default_index = (
+            all_categories.index(current_category)
+            if current_category in all_categories
+            else 0
+        )
+
+        def on_category_change():
+            """추천 카테고리 변경 시 캐시 무효화"""
+            st.session_state["reco_cache_key"] = None
+            st.session_state["reco_cache"] = []
+
+        selected_categories = st.selectbox(
+            "",
+            all_categories,
+            index=default_index,
+            key="reco_category_select",
+            label_visibility="collapsed",
+            on_change=on_category_change,
+        )
+
+    # 추천 상품 조회
+    with st.spinner("정보를 불러오는 중입니다..."):
+        reco_df_view = get_recommendations(df, selected_product, [selected_categories])
+
+    # reco_score / similarity 컬럼 방어적 보정
+    if "reco_score" not in reco_df_view.columns:
+        reco_df_view["reco_score"] = 0.0
+
+    if "similarity" not in reco_df_view.columns:
+        reco_df_view["similarity"] = 0.0
+
+    if sort_option == "추천순":
+        reco_df_view = reco_df_view.sort_values(
+            by=["reco_score", "similarity"],
+            ascending=[False, False],
+        )
+    else:
+        reco_df_view = sort_products(reco_df_view, sort_option)
+
+    render_recommendations_grid(reco_df_view, select_product_from_reco)
+
+
 # =========================
 # ✅ 메인 앱
 # =========================
@@ -343,60 +421,8 @@ def main():
     sort_option = "추천순"
     if not is_initial:
         if selected_product:
-            st.markdown("---")
-            st.subheader("👍 이 상품과 유사한 추천 상품")
-
-            col_1, col_2, col_3 = st.columns([5, 2, 3])
-            with col_2:
-                sort_option = st.selectbox(
-                    "정렬 옵션",
-                    options=[
-                        "추천순",
-                        "평점 높은 순",
-                        "리뷰 많은 순",
-                        "가격 낮은 순",
-                        "가격 높은 순",
-                    ],
-                    index=0,
-                    key="sort_option",
-                    label_visibility="collapsed",
-                    on_change=skip_scroll_apply_once,
-                )
-
-            with col_3:
-                if selected_product:
-                    all_categories = sorted(
-                        c
-                        for c in df["sub_category"].unique()
-                        if isinstance(c, str) and c.strip()
-                    )
-
-                    # 현재 선택된 상품 카테고리
-                    current_category = (
-                        df.loc[
-                            df["product_name"] == selected_product, "sub_category"
-                        ].iloc[0]
-                        if selected_product in df["product_name"].values
-                        else None
-                    )
-
-                    # 디폴트
-                    default_index = (
-                        all_categories.index(current_category)
-                        if current_category in all_categories
-                        else 0
-                    )
-
-                    selected_categories = st.selectbox(
-                        "",
-                        all_categories,
-                        index=default_index,
-                        key="reco_category_select",
-                        label_visibility="collapsed",
-                    )
-
-                else:
-                    selected_category = None
+            # 추천 상품 섹션을 fragment로 렌더링
+            render_recommendation_section(df, selected_product)
 
         else:
             # 문맥 검색일 때 다른 헤더 표시
@@ -539,51 +565,6 @@ def main():
                     show_pagination = selected_product or selected_sub_cat
                     if show_pagination and total_pages > 1:
                         render_pagination(total_pages, safe_scroll_to_top)
-        else:
-            # 추천 상품 조회 및 출력
-            with st.spinner("정보를 불러오는 중입니다..."):
-                # # 검색 타입과 키워드 확인
-                # search_type, search_keyword = get_search_info()
-
-                # # 문맥 검색 모드
-                # if search_type == "문맥" and search_keyword:
-                #     # BERTVectorizer가 이미 로드되어 있어야 함 (상단에서 처리)
-                #     from services.bert_vectorizer import BERTVectorizer
-
-                #     # 세션에 vectorizer가 없으면 로드
-                #     if "vectorizer" not in st.session_state:
-                #         st.session_state.vectorizer = BERTVectorizer(
-                #             model_name="./models/fine_tuned/roberta_semantic_final"
-                #         )
-
-                #     reco_df_view = get_recommendations(
-                #         df,
-                #         selected_product=None,
-                #         selected_categories=[selected_categories],
-                #         query_text=search_keyword,
-                #         vectorizer=st.session_state.vectorizer,
-                #     )
-                # else:
-                # 일반 상품 추천 모드
-                reco_df_view = get_recommendations(
-                    df, selected_product, [selected_categories]
-                )
-            # reco_score / similarity 컬럼 방어적 보정
-            if "reco_score" not in reco_df_view.columns:
-                reco_df_view["reco_score"] = 0.0
-
-            if "similarity" not in reco_df_view.columns:
-                reco_df_view["similarity"] = 0.0
-
-            if sort_option == "추천순":
-                reco_df_view = reco_df_view.sort_values(
-                    by=["reco_score", "similarity"],
-                    ascending=[False, False],
-                )
-            else:
-                reco_df_view = sort_products(reco_df_view, sort_option)
-
-            render_recommendations_grid(reco_df_view, select_product_from_reco)
 
     st.markdown(
         """
