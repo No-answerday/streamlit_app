@@ -117,7 +117,19 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     # 이미지 URL
     if "image_url" not in df.columns:
-        df["image_url"] = DEFAULT_IMAGE_URL
+        if "img_url" in df.columns:
+            # img_url이 있으면 image_url로 매핑
+            df["image_url"] = df["img_url"].fillna(DEFAULT_IMAGE_URL)
+            # 빈 문자열도 기본 이미지로 대체
+            mask = df["image_url"].astype(str).str.strip() == ""
+            df.loc[mask, "image_url"] = DEFAULT_IMAGE_URL
+        else:
+            df["image_url"] = DEFAULT_IMAGE_URL
+    else:
+        # image_url이 있어도 빈 값 처리
+        df["image_url"] = df["image_url"].fillna(DEFAULT_IMAGE_URL)
+        mask = df["image_url"].astype(str).str.strip() == ""
+        df.loc[mask, "image_url"] = DEFAULT_IMAGE_URL
 
     # 대표 리뷰 ID
     if "representative_review_id_roberta" not in df.columns:

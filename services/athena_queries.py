@@ -235,21 +235,22 @@ def load_products_data_from_athena(
 def fetch_top_reviews_text(product_id: str, review_ids: list):
     """
     특정 상품의 여러 리뷰를 한 번에 조회
-    
+
     Args:
         product_id: 상품 ID
         review_ids: 리뷰 ID 리스트
-    
+
     Returns:
         pd.DataFrame: 리뷰 데이터
     """
     if not review_ids:
         import pandas as pd
+
         return pd.DataFrame()
-    
+
     pid = quote_str(product_id)
     ids_str = ", ".join(str(int(rid)) for rid in review_ids)
-    
+
     sql = f"""
     SELECT 
         id,
