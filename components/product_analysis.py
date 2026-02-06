@@ -58,10 +58,11 @@ def render_representative_review(
                 )
 
 
+@st.fragment
 def _render_review_pagination(
     reviews_df: pd.DataFrame, review_type: str, product_id: str, skip_scroll_callback
 ):
-    """개별 리뷰 페이지네이션 렌더링"""
+    """개별 리뷰 페이지네이션 렌더링 (fragment로 독립 실행)"""
     page_key = f"rep_review_page_{review_type}_{product_id}"
 
     if page_key not in st.session_state:
