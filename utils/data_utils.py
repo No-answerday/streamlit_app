@@ -8,12 +8,70 @@ import numpy as np
 import re
 
 from utils.load_data import make_df
-from services.athena_queries import fetch_all_products, fetch_reviews_by_product, fetch_top_reviews_text
+from services.athena_queries import (
+    fetch_all_products,
+    fetch_reviews_by_product,
+    fetch_top_reviews_text,
+)
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_top_reviews_athena(product_id: str, limit: int = 5) -> pd.DataFrame:
-    """Athena에서 리뷰 텍스트 N개 로드"""
-    return fetch_top_reviews_text(product_id, limit=limit)
+
+def load_top_reviews_athena(
+    product_id: str, product_info: pd.Series, limit: int = 5, sentiment_type: str = None
+) -> pd.DataFrame:
+    """
+    Athena에서 대표 리뷰 텍스트 N개 로드
+
+    Args:
+        product_id: 상품 ID
+        product_info: 제품 정보 Series
+        limit: 로드할 리뷰 개수
+        sentiment_type: "positive" 또는 "negative" (None이면 긍정 대표 리뷰)
+
+    Returns:
+        pd.DataFrame: 리뷰 데이터
+    """
+    import json
+
+    # sentiment_type에 따라 적절한 ID 배열 선택
+    if sentiment_type == "negative":
+        ids = product_info.get("negative_representative_ids", [])
+        print(f"[DEBUG] Negative IDs raw: {ids}, type: {type(ids)}")
+    else:  # positive 또는 None
+        ids = product_info.get("positive_representative_ids", [])
+        print(f"[DEBUG] Positive IDs raw: {ids}, type: {type(ids)}")
+
+    # 배열이 문자열로 저장되어 있을 경우 파싱
+    if isinstance(ids, str):
+        # 빈 문자열이나 null 체크
+        ids = ids.strip()
+        if not ids or ids == "null" or ids == "NULL":
+            print(f"[DEBUG] Empty or null string")
+            return pd.DataFrame()
+        try:
+            ids = json.loads(ids)
+            print(f"[DEBUG] Parsed IDs: {ids}")
+        except Exception as e:
+            print(f"[DEBUG] JSON parse error: {e}")
+            return pd.DataFrame()
+
+    # None이거나 리스트가 아닌 경우
+    if ids is None or not isinstance(ids, list):
+        print(f"[DEBUG] IDs is None or not a list")
+        return pd.DataFrame()
+
+    # 빈 리스트 체크
+    if not ids:
+        print(f"[DEBUG] Empty list")
+        return pd.DataFrame()
+
+    # limit만큼만 가져오기
+    review_ids = ids[:limit]
+    print(f"[DEBUG] Final review_ids to fetch: {review_ids}")
+
+    result = fetch_top_reviews_text(product_id, review_ids)
+    print(f"[DEBUG] Fetched reviews count: {len(result)}")
+    return result
+
 
 # 메인 카테고리 목록
 MAIN_CATS = [
