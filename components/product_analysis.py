@@ -24,70 +24,122 @@ def render_top_keywords(product_info: pd.Series):
     st.write(top_kw if top_kw else "-")
 
 
-def render_representative_review(container, reviews_df: pd.DataFrame, skip_scroll_callback):
-    """대표 리뷰 렌더링"""
+def render_representative_review(
+    container,
+    positive_reviews_df: pd.DataFrame,
+    negative_reviews_df: pd.DataFrame,
+    skip_scroll_callback,
+):
+    """대표 리뷰 렌더링 (긍정/부정 분리)"""
     with container.container():
         st.markdown("### ✒️ 대표 리뷰")
 
-        if reviews_df is None or reviews_df.empty:
-            st.info("대표 리뷰가 없습니다.")
-            return
+        # 탭으로 긍정/부정 구분
+        tab_positive, tab_negative = st.tabs(["😊 긍정 리뷰", "😟 부정 리뷰"])
 
-        # 페이지 상태 키
         pid = st.session_state.get("_analysis_cache_product_id", "unknown")
-        page_key = f"rep_review_page_{pid}"
 
-        if page_key not in st.session_state:
-            st.session_state[page_key] = 0
+        # 긍정 리뷰 탭
+        with tab_positive:
+            if positive_reviews_df is None or positive_reviews_df.empty:
+                st.info("긍정 대표 리뷰가 없습니다.")
+            else:
+                _render_review_pagination(
+                    positive_reviews_df, "positive", pid, skip_scroll_callback
+                )
 
-        total = len(reviews_df)
-        page = int(st.session_state[page_key])
-        page = max(0, min(page, total - 1))
-        st.session_state[page_key] = page
+        # 부정 리뷰 탭
+        with tab_negative:
+            if negative_reviews_df is None or negative_reviews_df.empty:
+                st.info("부정 대표 리뷰가 없습니다.")
+            else:
+                _render_review_pagination(
+                    negative_reviews_df, "negative", pid, skip_scroll_callback
+                )
 
-        # 현재 페이지 리뷰 표시
-        row = reviews_df.iloc[page]
 
-        meta = []
-        if "date" in reviews_df.columns and pd.notna(row.get("date")):
-            meta.append(str(row.get("date")))
-        if "score" in reviews_df.columns and pd.notna(row.get("score")):
-            meta.append(f"평점 {row.get('score')}")
-        if meta:
-            st.caption(" · ".join(meta))
+def _render_review_pagination(
+    reviews_df: pd.DataFrame, review_type: str, product_id: str, skip_scroll_callback
+):
+    """개별 리뷰 페이지네이션 렌더링"""
+    page_key = f"rep_review_page_{review_type}_{product_id}"
 
-        # full_text 우선, 없으면 title+content
-        text = ""
-        if "full_text" in reviews_df.columns and pd.notna(row.get("full_text")):
-            text = str(row.get("full_text") or "")
-        if not text:
-            title = str(row.get("title") or "") if "title" in reviews_df.columns else ""
-            content = str(row.get("content") or "") if "content" in reviews_df.columns else ""
-            text = (title + "\n\n" + content).strip()
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 0
 
-        if text:
-            st.text(text)
-        else:
-            st.info("표시할 리뷰 텍스트가 없습니다.")
-        
-        # 페이지네이션
-        col_l, col_m, col_r = st.columns([2, 6, 2])
+    total = len(reviews_df)
+    page = int(st.session_state[page_key])
+    page = max(0, min(page, total - 1))
+    st.session_state[page_key] = page
 
-        def prev_page():
-            skip_scroll_callback()
-            st.session_state[page_key] = max(0, st.session_state[page_key] - 1)
+    # 현재 페이지 리뷰 표시
+    row = reviews_df.iloc[page]
 
-        def next_page():
-            skip_scroll_callback()
-            st.session_state[page_key] = min(total - 1, st.session_state[page_key] + 1)
+    meta = []
+    if "date" in reviews_df.columns and pd.notna(row.get("date")):
+        meta.append(str(row.get("date")))
+    if "score" in reviews_df.columns and pd.notna(row.get("score")):
+        score = row.get("score")
+        stars = "⭐" * int(score) if pd.notna(score) else ""
+        meta.append(f"{stars} {score}점")
+    if "sentiment_score" in reviews_df.columns and pd.notna(row.get("sentiment_score")):
+        sentiment = row.get("sentiment_score")
+        if pd.notna(sentiment):
+            sentiment_pct = f"{float(sentiment) * 100:.1f}%"
+            emoji = "😊" if float(sentiment) >= 0.5 else "😟"
+            meta.append(f"{emoji} {sentiment_pct}")
 
-        with col_l:
-            st.button("◀ 이전", on_click=prev_page, disabled=(page == 0), use_container_width=True, key=f"rep_prev_{pid}",)
-        with col_m:
-            st.markdown(f"<div style='text-align:center; padding-top:6px;'>({page+1} / {total})</div>", unsafe_allow_html=True)
-        with col_r:
-            st.button("다음 ▶", on_click=next_page, disabled=(page >= total - 1), use_container_width=True, key=f"rep_next_{pid}",)
-        
+    if meta:
+        st.caption(" · ".join(meta))
+
+    # full_text 우선, 없으면 title+content
+    text = ""
+    if "full_text" in reviews_df.columns and pd.notna(row.get("full_text")):
+        text = str(row.get("full_text") or "")
+    if not text:
+        title = str(row.get("title") or "") if "title" in reviews_df.columns else ""
+        content = (
+            str(row.get("content") or "") if "content" in reviews_df.columns else ""
+        )
+        text = (title + "\n\n" + content).strip()
+
+    if text:
+        st.text(text)
+    else:
+        st.info("표시할 리뷰 텍스트가 없습니다.")
+
+    # 페이지네이션 버튼
+    col_l, col_m, col_r = st.columns([2, 6, 2])
+
+    def prev_page():
+        skip_scroll_callback()
+        st.session_state[page_key] = max(0, st.session_state[page_key] - 1)
+
+    def next_page():
+        skip_scroll_callback()
+        st.session_state[page_key] = min(total - 1, st.session_state[page_key] + 1)
+
+    with col_l:
+        st.button(
+            "◀ 이전",
+            on_click=prev_page,
+            disabled=(page == 0),
+            use_container_width=True,
+            key=f"rep_prev_{review_type}_{product_id}",
+        )
+    with col_m:
+        st.markdown(
+            f"<div style='text-align:center; padding-top:6px;'>({page+1} / {total})</div>",
+            unsafe_allow_html=True,
+        )
+    with col_r:
+        st.button(
+            "다음 ▶",
+            on_click=next_page,
+            disabled=(page >= total - 1),
+            use_container_width=True,
+            key=f"rep_next_{review_type}_{product_id}",
+        )
 
 
 def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callback):
@@ -220,6 +272,7 @@ def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callbac
 
 def load_product_analysis_async(
     product_id: str,
+    product_info: pd.Series,
     review_id,
     container_review,
     container_trend,
@@ -230,6 +283,7 @@ def load_product_analysis_async(
 
     Args:
         product_id: 제품 ID
+        product_info: 제품 정보 Series
         review_id: 대표 리뷰 ID
         container_review: 대표 리뷰 placeholder
         container_trend: 평점 추이 placeholder
@@ -244,20 +298,29 @@ def load_product_analysis_async(
         st.markdown("### 📈 평점 추이")
         st.info("📈 평점 데이터를 불러오는 중입니다...")
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_type = {}
 
-        # 1. 대표 리뷰 요청
+        # 1. 긍정 대표 리뷰 요청
         if product_id:
-            f_rep = executor.submit(load_top_reviews_athena, str(product_id), 5)
-            future_to_type[f_rep] = "REVIEW"
+            f_pos = executor.submit(
+                load_top_reviews_athena, str(product_id), product_info, 5, "positive"
+            )
+            future_to_type[f_pos] = "REVIEW_POSITIVE"
 
-        # 2. 평점 추이 데이터 요청
+        # 2. 부정 대표 리뷰 요청
+        if product_id:
+            f_neg = executor.submit(
+                load_top_reviews_athena, str(product_id), product_info, 5, "negative"
+            )
+            future_to_type[f_neg] = "REVIEW_NEGATIVE"
+
+        # 3. 평점 추이 데이터 요청
         if product_id:
             f_trend = executor.submit(load_reviews_athena, str(product_id))
             future_to_type[f_trend] = "TREND"
 
-        # 3. 추천 상품 요청 (캐시 체크)
+        # 4. 추천 상품 요청 (캐시 체크)
         if product_id and st.session_state.get("reco_target_product_id") != product_id:
             f_reco = executor.submit(
                 recommend_similar_products,
@@ -267,6 +330,10 @@ def load_product_analysis_async(
             )
             future_to_type[f_reco] = "RECO"
 
+        # 리뷰 데이터 저장용
+        positive_df = pd.DataFrame()
+        negative_df = pd.DataFrame()
+
         # 먼저 끝나는 순서대로 결과 처리
         for future in as_completed(future_to_type):
             task_type = future_to_type[future]
@@ -274,10 +341,13 @@ def load_product_analysis_async(
             try:
                 result = future.result()
 
-                if task_type == "REVIEW":
-                    st.session_state["_rep_reviews_df_cache"] = result
-                    st.session_state["_analysis_cache_product_id"] = str(product_id)
-                    render_representative_review(container_review, result, skip_scroll_callback)
+                if task_type == "REVIEW_POSITIVE":
+                    positive_df = result
+                    st.session_state["_rep_positive_reviews_df_cache"] = result
+
+                elif task_type == "REVIEW_NEGATIVE":
+                    negative_df = result
+                    st.session_state["_rep_negative_reviews_df_cache"] = result
 
                 elif task_type == "TREND":
                     st.session_state["_reviews_df_cache"] = result
@@ -294,13 +364,19 @@ def load_product_analysis_async(
                     st.session_state["reco_target_product_id"] = product_id
 
             except Exception as e:
-                if task_type == "REVIEW":
-                    with container_review.container():
-                        st.markdown("### ✒️ 대표 리뷰")
-                        st.error(f"대표 리뷰 로드 실패: {e}")
+                if task_type == "REVIEW_POSITIVE":
+                    st.session_state["_rep_positive_reviews_df_cache"] = pd.DataFrame()
+                elif task_type == "REVIEW_NEGATIVE":
+                    st.session_state["_rep_negative_reviews_df_cache"] = pd.DataFrame()
                 elif task_type == "TREND":
                     with container_trend.container():
                         st.markdown("### 📈 평점 추이")
                         st.error(f"평점 추이 로드 실패: {e}")
                 elif task_type == "RECO":
                     st.error(f"추천 상품 로드 실패: {e}")
+
+        # 모든 리뷰가 로드된 후 렌더링
+        st.session_state["_analysis_cache_product_id"] = str(product_id)
+        render_representative_review(
+            container_review, positive_df, negative_df, skip_scroll_callback
+        )

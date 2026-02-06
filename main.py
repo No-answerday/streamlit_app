@@ -265,7 +265,9 @@ def main():
     # 제품 상세 정보 (선택 시)
     # =========================
     if selected_product:
-        st.caption("🔒 상품 선택 상태에서는 검색 모드가 적용되지 않습니다. 재검색하려면 상품 선택을 취소해주세요.")
+        st.caption(
+            "🔒 상품 선택 상태에서는 검색 모드가 적용되지 않습니다. 재검색하려면 상품 선택을 취소해주세요."
+        )
         with st.spinner("정보를 불러오는 중입니다..."):
             product_rows = df[df["product_name"] == selected_product]
 
@@ -292,15 +294,15 @@ def main():
             same_product_cache = str(product_id) == str(cache_pid)
 
             if same_product_cache:
-                rep_cache = st.session_state.get("_rep_reviews_df_cache")
-                if rep_cache is not None:
-                    render_representative_review(container_review, rep_cache, skip_scroll_apply_once)
-                else:
-                    # (호환용) 기존 1개 캐시가 남아있을 경우 대비
-                    rep_cache_old = st.session_state.get("_rep_review_df_cache")
-                    if rep_cache_old is not None:
-                        # 예전 포맷은 1행 DF, 그대로 보여주거나 필요하면 1행 DF를 5개 렌더 함수로 넘겨도 o
-                        render_representative_review(container_review, rep_cache_old, skip_scroll_apply_once)
+                pos_cache = st.session_state.get("_rep_positive_reviews_df_cache")
+                neg_cache = st.session_state.get("_rep_negative_reviews_df_cache")
+                if pos_cache is not None or neg_cache is not None:
+                    render_representative_review(
+                        container_review,
+                        pos_cache if pos_cache is not None else pd.DataFrame(),
+                        neg_cache if neg_cache is not None else pd.DataFrame(),
+                        skip_scroll_apply_once,
+                    )
 
                 trend_cache = st.session_state.get("_reviews_df_cache")
                 if trend_cache is not None:
@@ -314,15 +316,20 @@ def main():
                 st.session_state["_rep_review_df_cache"] = None
                 st.session_state["_reviews_df_cache"] = None
                 st.session_state["_rep_reviews_df_cache"] = None
+                st.session_state["_rep_positive_reviews_df_cache"] = None
+                st.session_state["_rep_negative_reviews_df_cache"] = None
                 st.session_state["_analysis_cache_product_id"] = str(product_id)
 
                 # 제품별 페이지 키 리셋
-                page_key = f"rep_review_page_{st.session_state['_analysis_cache_product_id']}"
+                page_key = (
+                    f"rep_review_page_{st.session_state['_analysis_cache_product_id']}"
+                )
                 st.session_state[page_key] = 0
 
             if st.session_state.get("last_loaded_product_id") != product_id:
                 load_product_analysis_async(
                     product_id,
+                    product_info,
                     review_id,
                     container_review,
                     container_trend,
