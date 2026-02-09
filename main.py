@@ -320,7 +320,11 @@ def main():
                 ]
 
                 # 캐시 키에 피부 타입 정보도 포함
-                cache_key = ("context_search", search_keyword_pre, tuple(detected_skin_types))
+                cache_key = (
+                    "context_search",
+                    search_keyword_pre,
+                    tuple(detected_skin_types),
+                )
                 if st.session_state.get("context_search_cache_key") != cache_key:
                     with st.spinner("문맥 검색 중..."):
                         from services.recommend_similar_products import (
@@ -337,15 +341,17 @@ def main():
                             for skin in detected_skin_types:
                                 if skin == "복합성":
                                     # 복합/혼합으로 시작하는 모든 피부 타입 포함
-                                    skin_filter.extend([
-                                        s for s in df["skin_type"].dropna().unique()
-                                        if s.startswith("복합/혼합")
-                                    ])
+                                    skin_filter.extend(
+                                        [
+                                            s
+                                            for s in df["skin_type"].dropna().unique()
+                                            if s.startswith("복합/혼합")
+                                        ]
+                                    )
                                 else:
                                     skin_filter.append(skin)
-                            
+
                             search_data = df[df["skin_type"].isin(skin_filter)]
-                            st.info(f"🎯 피부 타입 '{', '.join(detected_skin_types)}' 제품 중에서 검색합니다.")
 
                         reco_results = recommend_similar_products(
                             query_text=search_keyword_pre,
