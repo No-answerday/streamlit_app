@@ -313,19 +313,46 @@ def main():
                     "문맥 검색을 사용할 수 없습니다. 다른 검색 타입을 사용해주세요."
                 )
             else:
-                # 캐시 키 확인 (같은 검색어면 재검색 안함)
-                cache_key = ("context_search", search_keyword_pre)
+                # 검색어에서 피부 타입 키워드 추출
+                skin_type_keywords = ["건성", "지성", "복합성", "민감성", "여드름성"]
+                detected_skin_types = [
+                    skin for skin in skin_type_keywords if skin in search_keyword_pre
+                ]
+
+                # 캐시 키에 피부 타입 정보도 포함
+                cache_key = ("context_search", search_keyword_pre, tuple(detected_skin_types))
                 if st.session_state.get("context_search_cache_key") != cache_key:
                     with st.spinner("문맥 검색 중..."):
                         from services.recommend_similar_products import (
                             recommend_similar_products,
                         )
 
+                        # 피부 타입이 감지되면 해당 타입으로 필터링
+                        # recommend_similar_products는 categories만 받으므로
+                        # 전체 데이터를 피부 타입으로 미리 필터링
+                        search_data = df
+                        if detected_skin_types:
+                            # 복합성 → 복합/혼합으로 매핑
+                            skin_filter = []
+                            for skin in detected_skin_types:
+                                if skin == "복합성":
+                                    # 복합/혼합으로 시작하는 모든 피부 타입 포함
+                                    skin_filter.extend([
+                                        s for s in df["skin_type"].dropna().unique()
+                                        if s.startswith("복합/혼합")
+                                    ])
+                                else:
+                                    skin_filter.append(skin)
+                            
+                            search_data = df[df["skin_type"].isin(skin_filter)]
+                            st.info(f"🎯 피부 타입 '{', '.join(detected_skin_types)}' 제품 중에서 검색합니다.")
+
                         reco_results = recommend_similar_products(
                             query_text=search_keyword_pre,
                             categories=None,
                             top_n=5,  # 카테고리별 상위 5개
                             vectorizer=st.session_state.vectorizer,
+                            data=search_data,  # 피부 타입 필터링된 데이터 전달
                         )
 
                         # 결과를 product_name 리스트로 변환 (유사도 순)
