@@ -319,11 +319,18 @@ def main():
                     skin for skin in skin_type_keywords if skin in search_keyword_pre
                 ]
 
-                # 캐시 키에 피부 타입 정보도 포함
+                # 검색어에서 카테고리 키워드 추출
+                all_categories = df["category"].dropna().unique().tolist()
+                detected_categories = [
+                    cat for cat in all_categories if cat in search_keyword_pre
+                ]
+
+                # 캐시 키에 피부 타입 + 카테고리 정보도 포함
                 cache_key = (
                     "context_search",
                     search_keyword_pre,
                     tuple(detected_skin_types),
+                    tuple(detected_categories),
                 )
                 if st.session_state.get("context_search_cache_key") != cache_key:
                     with st.spinner("문맥 검색 중..."):
@@ -335,6 +342,8 @@ def main():
                         # recommend_similar_products는 categories만 받으므로
                         # 전체 데이터를 피부 타입으로 미리 필터링
                         search_data = df
+                        filter_messages = []
+                        
                         if detected_skin_types:
                             # 복합성 → 복합/혼합으로 매핑
                             skin_filter = []
@@ -351,14 +360,22 @@ def main():
                                 else:
                                     skin_filter.append(skin)
 
-                            search_data = df[df["skin_type"].isin(skin_filter)]
+                            search_data = search_data[search_data["skin_type"].isin(skin_filter)]
+                            filter_messages.append(f"피부 타입: {', '.join(detected_skin_types)}")
+                        
+                        if detected_categories:
+                            search_data = search_data[search_data["category"].isin(detected_categories)]
+                            filter_messages.append(f"카테고리: {', '.join(detected_categories)}")
+                        
+                        if filter_messages:
+                            st.info(f"🎯 {' | '.join(filter_messages)} 제품 중에서 검색합니다.")
 
                         reco_results = recommend_similar_products(
                             query_text=search_keyword_pre,
                             categories=None,
                             top_n=5,  # 카테고리별 상위 5개
                             vectorizer=st.session_state.vectorizer,
-                            data=search_data,  # 피부 타입 필터링된 데이터 전달
+                            data=search_data,  # 피부 타입 + 카테고리 필터링된 데이터 전달
                         )
 
                         # 결과를 product_name 리스트로 변환 (유사도 순)
