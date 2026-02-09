@@ -4,7 +4,7 @@
 
 import streamlit as st
 import math
-
+import pandas as pd
 
 def calculate_pagination(
     search_df: "pd.DataFrame",
@@ -92,7 +92,6 @@ def get_page_slice(
     Returns:
         페이지 데이터 DataFrame
     """
-    import pandas as pd
 
     if selected_product:
         return pd.DataFrame()

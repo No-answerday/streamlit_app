@@ -18,11 +18,27 @@ def render_top_keywords(product_info: pd.Series):
     """대표 키워드 렌더링"""
     st.markdown("---")
     st.markdown("### 📃 대표 키워드")
-    top_kw = product_info.get("top_keywords_str", "")
-    if isinstance(top_kw, (list, np.ndarray)):
-        top_kw = ", ".join(map(str, top_kw))
-    st.write(top_kw if top_kw else "-")
+    top_kw = product_info.get("top_keywords_str", [])
+    if isinstance(top_kw, str):
+        top_kw = [k.strip() for k in top_kw.split(",") if k.strip()] 
+    cols = st.columns(5) 
 
+    for col, kw in zip(cols, top_kw): 
+        with col: 
+            st.markdown(
+                f""" 
+                    <div style=" 
+                    padding:12px; 
+                    border-radius:12px; 
+                    background:#f5f7fa; 
+                    text-align:center; 
+                    font-weight:600; 
+                "> 
+                #{kw} 
+                </div> 
+                """, 
+                unsafe_allow_html=True, 
+            )
 
 def render_representative_review(
     container_pos,
@@ -154,6 +170,7 @@ def _render_review_pagination(
 def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callback):
     """평점 추이 렌더링"""
     with container.container():
+        st.markdown("---")
         st.markdown("### 📈 평점 추이")
 
         if (

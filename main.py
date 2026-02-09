@@ -430,7 +430,6 @@ def main():
             product_id = product_info.get("product_id", "")
             review_id = product_info.get("representative_review_id_roberta", None)
 
-            st.markdown("### ✒️ 대표 리뷰")
             container_pos_review = st.empty()
             container_neg_review = st.empty()
             container_trend = st.empty()
