@@ -123,13 +123,35 @@ def sidebar(df):
                     sub_df = main_df[main_df["middle_category"] == middle]
                     sub_cats = sorted(sub_df["sub_category"].dropna().unique())
 
-                    # mid == sub 인 경우: expander 없이 checkbox 하나
-                    if len(sub_cats) == 1 and sub_cats[0] == middle:
-                        key = f"sub_{main_cat}_{middle}"
-                        main_sub_keys.append(key)
+                    # main == mid
+                    if str(middle).strip() == str(main_cat).strip():
+                        middle_all_key = f"all_middle_{main_cat}_{middle}"
 
-                        if st.checkbox(middle, key=key, disabled=sidebar_disabled):
-                            selected_sub_cat.append(middle)
+                        middle_sub_keys = []
+                        for sub in sub_cats:
+                            key = f"sub_{main_cat}_{middle}_{sub}"
+                            middle_sub_keys.append(key)
+                            main_sub_keys.append(key)
+                        
+                        def toggle_middle_all(keys, all_key):
+                            val = st.session_state.get(all_key, False)
+                            for k in keys:
+                                st.session_state[k] =  val
+
+                        st.checkbox(
+                            "전체 선택",
+                            key=middle_all_key,
+                            on_change=toggle_middle_all,
+                            args=(middle_sub_keys, middle_all_key),
+                            disabled=sidebar_disabled,
+                        )
+
+                        for sub in sub_cats:
+                            key = f"sub_{main_cat}_{middle}_{sub}"
+
+                            if st.checkbox(sub, key=key, disabled=sidebar_disabled):
+                                selected_sub_cat.append(sub)
+                        continue
 
                     # 일반적인 mid > sub 구조
                     else:
