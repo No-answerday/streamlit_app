@@ -1,9 +1,9 @@
 """
-Hugging Face Inference API를 사용한 벡터화 모듈
+Hugging Face Inference API를 사용한 벡터화 모듈 (공식 클라이언트 사용)
 """
 
 import numpy as np
-import requests
+from huggingface_hub import InferenceClient
 from typing import List, Optional
 import os
 import time
@@ -12,24 +12,22 @@ import time
 class HuggingFaceAPIVectorizer:
     """
     Hugging Face Inference API를 사용한 벡터화 클래스
-    로컬 모델 로드 없이 API 호출만으로 임베딩 생성
+    공식 InferenceClient 라이브러리 사용 (자동 라우팅)
     """
 
     def __init__(
         self,
         model_id: str,
         api_token: Optional[str] = None,
-        api_url: Optional[str] = None,
     ):
         """
         Args:
-            model_id: Hugging Face 모델 ID (예: "your-username/roberta-semantic-final")
+            model_id: Hugging Face 모델 ID (예: "fullfish/multicampus_semantic")
             api_token: Hugging Face API 토큰 (환경변수 HF_TOKEN에서 자동 로드)
-            api_url: 커스텀 API URL (기본값: Hugging Face Inference API)
         """
         self.model_id = model_id
 
-        # API 토큰 로드 (환경변수 우선)
+        # API 토큰 로드
         self.api_token = api_token or os.getenv("HF_TOKEN")
         if not self.api_token:
             raise ValueError(
@@ -37,18 +35,12 @@ class HuggingFaceAPIVectorizer:
                 "환경변수 HF_TOKEN을 설정하거나 api_token 파라미터를 전달하세요."
             )
 
-        # API URL 설정
-        if api_url:
-            self.api_url = api_url
-        else:
-            # Hugging Face Inference API (무료/Pro)
-            self.api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_id}"
-
-        self.headers = {"Authorization": f"Bearer {self.api_token}"}
+        # InferenceClient 초기화 (자동으로 올바른 엔드포인트 사용)
+        self.client = InferenceClient(model=model_id, token=self.api_token)
 
         print(f"✓ Hugging Face API Vectorizer 초기화 완료")
         print(f"  - Model: {model_id}")
-        print(f"  - API: Hugging Face Inference API")
+        print(f"  - API: Hugging Face Inference API (공식 클라이언트)")
 
     def encode(self, text: str, max_retries: int = 3) -> np.ndarray:
         """
@@ -64,34 +56,29 @@ class HuggingFaceAPIVectorizer:
         if not text or not text.strip():
             return np.zeros(768)  # 빈 텍스트는 zero 벡터
 
-        payload = {
-            "inputs": text,
-            "options": {"wait_for_model": True},  # 모델 로딩 대기
-        }
-
         for attempt in range(max_retries):
             try:
-                response = requests.post(
-                    self.api_url, headers=self.headers, json=payload, timeout=30
-                )
+                # feature_extraction: 문장 임베딩 반환
+                response = self.client.feature_extraction(text)
 
-                if response.status_code == 200:
-                    # API 응답: [[token1_vec, token2_vec, ...]]
-                    embeddings = response.json()
+                # Mean Pooling 적용 (토큰 벡터들의 평균)
+                if isinstance(response, list) and len(response) > 0:
+                    embedding = np.mean(np.array(response), axis=0)
+                    return embedding
+                else:
+                    return (
+                        np.array(response)
+                        if isinstance(response, list)
+                        else np.zeros(768)
+                    )
 
-                    # Mean Pooling (CLS 토큰 제외)
-                    if isinstance(embeddings, list) and len(embeddings) > 0:
-                        # 첫 번째 배치의 토큰 벡터들을 평균
-                        token_embeddings = np.array(embeddings[0])
-                        mean_embedding = np.mean(token_embeddings, axis=0)
-                        return mean_embedding
-                    else:
-                        return np.zeros(768)
+            except Exception as e:
+                error_msg = str(e).lower()
 
-                elif response.status_code == 503:
-                    # 모델 로딩 중 - 재시도
+                # 모델 로딩 중
+                if "loading" in error_msg or "503" in error_msg:
                     if attempt < max_retries - 1:
-                        wait_time = 2**attempt  # 지수 백오프
+                        wait_time = 2**attempt
                         print(
                             f"⏳ 모델 로딩 중... {wait_time}초 후 재시도 ({attempt+1}/{max_retries})"
                         )
@@ -100,26 +87,13 @@ class HuggingFaceAPIVectorizer:
                     else:
                         raise Exception("모델 로딩 타임아웃. 나중에 다시 시도해주세요.")
 
-                else:
-                    raise Exception(
-                        f"API 오류 (HTTP {response.status_code}): {response.text}"
-                    )
-
-            except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    print(f"⏳ 타임아웃 - 재시도 중... ({attempt+1}/{max_retries})")
-                    time.sleep(2)
-                    continue
-                else:
-                    raise Exception("API 호출 타임아웃")
-
-            except Exception as e:
+                # 기타 오류
                 if attempt < max_retries - 1:
                     print(f"⚠️ 오류 발생 - 재시도 중... ({attempt+1}/{max_retries})")
                     time.sleep(2)
                     continue
                 else:
-                    raise
+                    raise Exception(f"API 호출 실패: {e}")
 
         raise Exception("API 호출 최대 재시도 횟수 초과")
 
