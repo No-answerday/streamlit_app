@@ -66,11 +66,11 @@ def sidebar(df):
 
     # 전체 선택 버튼 초기화
     if "category_select_all" not in st.session_state:
-        st.session_state["category_select_all"] = False
-        # 모든 카테고리 키를 False로 설정
+        st.session_state["category_select_all"] = True
+        # 모든 카테고리 키를 True로 설정
         for key in all_category_keys:
             if key not in st.session_state:
-                st.session_state[key] = False
+                st.session_state[key] = True
 
     # 전체 선택/해제 토글 함수
     def toggle_all_categories():
