@@ -278,8 +278,18 @@ def main():
     # 문맥 검색일 때 미리 검색 수행
     if search_type_pre == "문맥" and search_keyword_pre:
         try:
-            # 환경변수에서 USE_HF_API 설정 확인 (기본: 로컬)
-            use_hf_api = os.getenv("USE_HF_API", "false").lower() == "true"
+            # 환경변수 읽기 헬퍼 (Streamlit Cloud와 로컬 모두 지원)
+            def get_config(key: str, default: str = "") -> str:
+                """Streamlit secrets 또는 환경변수에서 값 읽기"""
+                try:
+                    # Streamlit Cloud secrets 우선
+                    return st.secrets.get(key, os.getenv(key, default))
+                except:
+                    # secrets 없으면 환경변수
+                    return os.getenv(key, default)
+
+            # USE_HF_API 설정 확인 (기본: 로컬)
+            use_hf_api = get_config("USE_HF_API", "false").lower() == "true"
 
             # 세션에 vectorizer가 없으면 로드
             if "vectorizer" not in st.session_state:
@@ -288,12 +298,14 @@ def main():
                         # Hugging Face API 사용
                         from services.hf_api_vectorizer import get_hf_api_vectorizer
 
-                        hf_model_id = os.getenv(
+                        hf_model_id = get_config(
                             "HF_MODEL_ID", "fullfish/multicampus_semantic"
                         )
+                        hf_token = get_config("HF_TOKEN")
+
                         try:
                             st.session_state.vectorizer = get_hf_api_vectorizer(
-                                model_id=hf_model_id
+                                model_id=hf_model_id, api_token=hf_token
                             )
                             st.success(f"✓ API 모델 연결 완료: {hf_model_id}")
                         except Exception as e:

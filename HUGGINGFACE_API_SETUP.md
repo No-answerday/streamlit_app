@@ -118,12 +118,34 @@ load_dotenv()
 
 1. Streamlit Cloud Dashboard 접속
 2. 앱 선택 > **Settings** > **Secrets**
-3. 다음 내용 추가:
+3. 다음 내용 추가 (⚠️ **TOML 형식, 큰따옴표 사용**):
 
 ```toml
 USE_HF_API = "true"
 HF_TOKEN = "hf_xxxxxxxxxxxxxxxxxxxxxxxxx"
 HF_MODEL_ID = "your-username/roberta-semantic-final"
+```
+
+⚠️ **주의사항**:
+
+- 키 이름은 **대문자**로 정확히 입력 (`USE_HF_API`, `HF_TOKEN`, `HF_MODEL_ID`)
+- 값은 반드시 **큰따옴표(`"`)로 감싸기**
+- 등호(`=`) 앞뒤 공백 있어야 함
+- 저장 후 앱이 자동으로 재시작됨
+
+**올바른 예시**:
+
+```toml
+USE_HF_API = "true"
+HF_TOKEN = "hf_abcd1234efgh5678ijkl"
+HF_MODEL_ID = "fullfish/multicampus_semantic"
+```
+
+**잘못된 예시**:
+
+```toml
+use_hf_api = true  ❌ (소문자, 따옴표 없음)
+HF_TOKEN=hf_xxx    ❌ (공백 없음, 따옴표 없음)
 ```
 
 ---
