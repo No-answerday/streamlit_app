@@ -288,50 +288,24 @@ def main():
                     # secrets 없으면 환경변수
                     return os.getenv(key, default)
 
-            # USE_HF_API 설정 확인 (기본: 로컬)
-            use_hf_api = get_config("USE_HF_API", "false").lower() == "true"
-
             # 세션에 vectorizer가 없거나 None이면 (재)로드
             if not st.session_state.get("vectorizer"):
-                with st.spinner("AI 모델 서버에 연결 중..."):
-                    if use_hf_api:
-                        # Hugging Face API 사용
-                        from services.hf_api_vectorizer import HuggingFaceAPIVectorizer
+                with st.spinner("AI 모델 로딩 중... (최초 1회)"):
+                    from services.hf_api_vectorizer import HuggingFaceAPIVectorizer
 
-                        hf_model_id = get_config(
-                            "HF_MODEL_ID", "fullfish/multicampus_semantic"
+                    hf_model_id = get_config(
+                        "HF_MODEL_ID", "fullfish/multicampus_semantic"
+                    )
+                    hf_token = get_config("HF_TOKEN")
+
+                    try:
+                        st.session_state.vectorizer = HuggingFaceAPIVectorizer(
+                            model_id=hf_model_id,
+                            api_token=hf_token if hf_token else None,
                         )
-                        hf_token = get_config("HF_TOKEN")
-
-                        try:
-                            st.session_state.vectorizer = HuggingFaceAPIVectorizer(
-                                model_id=hf_model_id, api_token=hf_token
-                            )
-                        except Exception as e:
-                            st.error(f"⚠️ Hugging Face API 연결 실패: {e}")
-                            st.session_state.pop("vectorizer", None)
-                    else:
-                        # 로컬 모델 사용 (기존 방식)
-                        from services.bert_vectorizer import BERTVectorizer
-
-                        model_path = "./models/fine_tuned/roberta_semantic_final"
-
-                        if not os.path.exists(model_path):
-                            st.error(
-                                "⚠️ 문맥 검색 모델을 찾을 수 없습니다.\n\n"
-                                "모델 파일이 필요합니다. 자세한 내용은 MODELS_README.md를 참조하세요.\n\n"
-                                "💡 Hugging Face API를 사용하려면 환경변수를 설정하세요:\n"
-                                "```\n"
-                                "USE_HF_API=true\n"
-                                "HF_TOKEN=your_token\n"
-                                "HF_MODEL_ID=your-username/roberta-semantic-final\n"
-                                "```"
-                            )
-                            st.session_state.pop("vectorizer", None)
-                        else:
-                            st.session_state.vectorizer = BERTVectorizer(
-                                model_name=model_path
-                            )
+                    except Exception as e:
+                        st.error(f"⚠️ 모델 로딩 실패: {e}")
+                        st.session_state.pop("vectorizer", None)
 
             # vectorizer가 로드되지 않았으면 문맥 검색 건너뛰기
             if not st.session_state.get("vectorizer"):
