@@ -25,37 +25,45 @@ def render_top_keywords(product_info: pd.Series):
 
 
 def render_representative_review(
-    container,
+    container_pos,
+    container_neg,
     positive_reviews_df: pd.DataFrame,
     negative_reviews_df: pd.DataFrame,
     skip_scroll_callback,
 ):
-    """대표 리뷰 렌더링 (긍정/부정 분리)"""
+    """대표 리뷰 렌더링 (긍정/부정 독립 컨테이너)"""
+    pid = st.session_state.get("_analysis_cache_product_id", "unknown")
+
+    _render_single_review_section(
+        container_pos,
+        positive_reviews_df,
+        "positive",
+        "😊 긍정 대표 리뷰",
+        pid,
+        skip_scroll_callback,
+    )
+    _render_single_review_section(
+        container_neg,
+        negative_reviews_df,
+        "negative",
+        "😟 부정 대표 리뷰",
+        pid,
+        skip_scroll_callback,
+    )
+
+
+def _render_single_review_section(
+    container, reviews_df, review_type, title, pid, skip_scroll_callback
+):
+    """단일 리뷰 타입 섹션 렌더링"""
     with container.container():
-        st.markdown("### ✒️ 대표 리뷰")
-
-        # 탭으로 긍정/부정 구분
-        tab_positive, tab_negative = st.tabs(["😊 긍정 리뷰", "😟 부정 리뷰"])
-
-        pid = st.session_state.get("_analysis_cache_product_id", "unknown")
-
-        # 긍정 리뷰 탭
-        with tab_positive:
-            if positive_reviews_df is None or positive_reviews_df.empty:
-                st.info("긍정 대표 리뷰가 없습니다.")
-            else:
-                _render_review_pagination(
-                    positive_reviews_df, "positive", pid, skip_scroll_callback
-                )
-
-        # 부정 리뷰 탭
-        with tab_negative:
-            if negative_reviews_df is None or negative_reviews_df.empty:
-                st.info("부정 대표 리뷰가 없습니다.")
-            else:
-                _render_review_pagination(
-                    negative_reviews_df, "negative", pid, skip_scroll_callback
-                )
+        st.markdown(f"#### {title}")
+        if reviews_df is None or reviews_df.empty:
+            st.info(f"{title}가 없습니다.")
+        else:
+            _render_review_pagination(
+                reviews_df, review_type, pid, skip_scroll_callback
+            )
 
 
 @st.fragment
@@ -168,174 +176,192 @@ def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callbac
         min_date = review_df["date"].min().date()
         max_date = review_df["date"].max().date()
 
-        # product_id + 렌더 카운터
         pid = st.session_state.get("_analysis_cache_product_id", "unknown")
-        render_key = st.session_state.get("_rating_render_key", 0)
-        st.session_state["_rating_render_key"] = render_key + 1
 
-        freq_key = f"rating_freq_{pid}_{render_key}"
-        date_key = f"rating_date_{pid}_{render_key}"
-        reset_key = f"rating_reset_{pid}_{render_key}"
+        # fragment로 UI 부분만 분리
+        _render_rating_trend_ui(
+            review_df, min_date, max_date, pid, skip_scroll_callback
+        )
 
-        col_left, col_mid, col_right, _ = st.columns([1, 1, 1, 1])
 
-        with col_left:
-            freq_label = st.selectbox(
-                "평균 기준",
-                ["일간", "주간", "월간"],
-                index=2,
-                key=freq_key,
-                on_change=skip_scroll_callback,
+@st.fragment
+def _render_rating_trend_ui(
+    review_df: pd.DataFrame, min_date, max_date, pid: str, skip_scroll_callback
+):
+    """평점 추이 UI 렌더링 (fragment로 독립 실행)"""
+    freq_key = f"rating_freq_{pid}"
+    date_key = f"rating_date_{pid}"
+    reset_key = f"rating_reset_{pid}"
+
+    col_left, col_mid, col_right, _ = st.columns([1, 1, 1, 1])
+
+    with col_left:
+        freq_label = st.selectbox(
+            "평균 기준",
+            ["일간", "주간", "월간"],
+            index=2,
+            key=freq_key,
+        )
+
+    freq_map = {
+        "일간": ("D", 7),
+        "주간": ("W", 4),
+        "월간": ("ME", 3),
+    }
+    freq, ma_window = freq_map[freq_label]
+
+    DATE_RANGE_KEY = f"rating_date_range_{pid}"
+    default_date_range = (min_date, max_date)
+
+    # 저장된 날짜 범위가 있으면 사용, 없으면 기본값
+    if DATE_RANGE_KEY not in st.session_state:
+        st.session_state[DATE_RANGE_KEY] = default_date_range
+
+    with col_mid:
+        date_range = st.date_input(
+            "기간 선택",
+            value=st.session_state[DATE_RANGE_KEY],
+            min_value=min_date,
+            max_value=max_date,
+            key=date_key,
+        )
+
+    def reset_date_range():
+        skip_scroll_callback()
+        st.session_state[DATE_RANGE_KEY] = default_date_range
+
+    with col_right:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.button(
+            "↺",
+            key=reset_key,
+            help="날짜 초기화",
+            on_click=reset_date_range,
+        )
+
+    trend_df = pd.DataFrame()
+    is_date_range_ready = False
+
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        is_date_range_ready = True
+        start_date, end_date = date_range
+        start_date = pd.to_datetime(start_date)
+        end_date = pd.to_datetime(end_date)
+
+        # 날짜 범위 저장
+        st.session_state[DATE_RANGE_KEY] = (start_date.date(), end_date.date())
+
+        date_df = review_df.loc[
+            (review_df["date"] >= start_date) & (review_df["date"] <= end_date)
+        ]
+        if not date_df.empty:
+            trend_df = rating_trend(date_df, freq=freq, ma_window=ma_window)
+    else:
+        st.info("마지막 날짜를 선택해주세요.📆")
+
+    if is_date_range_ready and not trend_df.empty:
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=trend_df["date"],
+                y=trend_df["avg_score"],
+                name=f"{freq_label} 평균",
+                marker_color="slateblue",
+                opacity=0.4,
             )
-
-        freq_map = {
-            "일간": ("D", 7),
-            "주간": ("W", 4),
-            "월간": ("ME", 3),
-        }
-        freq, ma_window = freq_map[freq_label]
-
-        DATE_RANGE_KEY = "rating_date_range"
-        default_date_range = (min_date, max_date)
-
-        with col_mid:
-            date_range = st.date_input(
-                "기간 선택",
-                value=default_date_range,
-                min_value=min_date,
-                max_value=max_date,
-                key=date_key,
-                on_change=skip_scroll_callback,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=trend_df["date"],
+                y=trend_df["ma"],
+                mode="lines",
+                name=f"추세 ({ma_window}개{freq_label} 이동평균)",
+                line=dict(color="royalblue", width=3),
             )
-
-        def reset_date_range():
-            skip_scroll_callback()
-            st.session_state[DATE_RANGE_KEY] = (min_date, max_date)
-
-        with col_right:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.button(
-                "↺",
-                key=reset_key,
-                help="날짜 초기화",
-                on_click=reset_date_range,
-            )
-
-        trend_df = pd.DataFrame()
-        is_date_range_ready = False
-
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            is_date_range_ready = True
-            start_date, end_date = date_range
-            start_date = pd.to_datetime(start_date)
-            end_date = pd.to_datetime(end_date)
-
-            date_df = review_df.loc[
-                (review_df["date"] >= start_date) & (review_df["date"] <= end_date)
-            ]
-            if not date_df.empty:
-                trend_df = rating_trend(date_df, freq=freq, ma_window=ma_window)
-        else:
-            st.info("마지막 날짜를 선택해주세요.📆")
-
-        if is_date_range_ready and not trend_df.empty:
-            fig = go.Figure()
-            fig.add_trace(
-                go.Bar(
-                    x=trend_df["date"],
-                    y=trend_df["avg_score"],
-                    name=f"{freq_label} 평균",
-                    marker_color="slateblue",
-                    opacity=0.4,
-                )
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=trend_df["date"],
-                    y=trend_df["ma"],
-                    mode="lines",
-                    name=f"추세 ({ma_window}개{freq_label} 이동평균)",
-                    line=dict(color="royalblue", width=3),
-                )
-            )
-            fig.update_layout(
-                yaxis=dict(range=[1, 5.1]),
-                xaxis_title="날짜",
-                yaxis_title="평균 평점",
-                hovermode="x unified",
-                template="plotly_white",
-                height=350,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        elif is_date_range_ready and trend_df.empty:
-            st.info("선택한 기간에 대한 평점 데이터가 없습니다.")
+        )
+        fig.update_layout(
+            yaxis=dict(range=[1, 5.1]),
+            xaxis_title="날짜",
+            yaxis_title="평균 평점",
+            hovermode="x unified",
+            template="plotly_white",
+            height=350,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    elif is_date_range_ready and trend_df.empty:
+        st.info("선택한 기간에 대한 평점 데이터가 없습니다.")
 
 
 def load_product_analysis_async(
     product_id: str,
     product_info: pd.Series,
     review_id,
-    container_review,
+    container_pos_review,
+    container_neg_review,
     container_trend,
     skip_scroll_callback,
 ):
     """
     비동기로 대표 리뷰, 평점 추이, 추천 상품 로드
+    각 컨테이너에 도착 즉시 렌더링
 
     Args:
         product_id: 제품 ID
         product_info: 제품 정보 Series
         review_id: 대표 리뷰 ID
-        container_review: 대표 리뷰 placeholder
+        container_pos_review: 긍정 리뷰 placeholder
+        container_neg_review: 부정 리뷰 placeholder
         container_trend: 평점 추이 placeholder
         skip_scroll_callback: 스크롤 스킵 콜백
     """
     # 초기 로딩 메시지 표시
-    with container_review.container():
-        st.markdown("### ✒️ 대표 리뷰")
-        st.info("✒️ 대표 리뷰를 분석 중입니다...")
+    with container_pos_review.container():
+        st.markdown("#### 😊 긍정 대표 리뷰")
+        st.info("긍정 대표 리뷰를 불러오는 중...")
+
+    with container_neg_review.container():
+        st.markdown("#### 😟 부정 대표 리뷰")
+        st.info("부정 대표 리뷰를 불러오는 중...")
 
     with container_trend.container():
         st.markdown("### 📈 평점 추이")
-        st.info("📈 평점 데이터를 불러오는 중입니다...")
+        st.info("📈 평점 데이터를 불러오는 중...")
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    pid = str(product_id)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
         future_to_type = {}
 
-        # 1. 긍정 대표 리뷰 요청
         if product_id:
             f_pos = executor.submit(
-                load_top_reviews_athena, str(product_id), product_info, 5, "positive"
+                load_top_reviews_athena, pid, product_info, 5, "positive"
             )
             future_to_type[f_pos] = "REVIEW_POSITIVE"
 
-        # 2. 부정 대표 리뷰 요청
-        if product_id:
             f_neg = executor.submit(
-                load_top_reviews_athena, str(product_id), product_info, 5, "negative"
+                load_top_reviews_athena, pid, product_info, 5, "negative"
             )
             future_to_type[f_neg] = "REVIEW_NEGATIVE"
 
-        # 3. 평점 추이 데이터 요청
-        if product_id:
-            f_trend = executor.submit(load_reviews_athena, str(product_id))
+            f_trend = executor.submit(load_reviews_athena, pid)
             future_to_type[f_trend] = "TREND"
 
-        # 4. 추천 상품 요청 (캐시 체크)
         if product_id and st.session_state.get("reco_target_product_id") != product_id:
+            # 현재 상품의 카테고리로만 초기 검색 (성능 최적화)
+            current_category = (
+                product_info.get("sub_category")
+                if pd.notna(product_info.get("sub_category"))
+                else None
+            )
             f_reco = executor.submit(
                 recommend_similar_products,
                 product_id=product_id,
-                categories=None,
+                categories=[current_category] if current_category else None,
                 top_n=100,
             )
             future_to_type[f_reco] = "RECO"
 
-        # 리뷰 데이터 저장용
-        positive_df = pd.DataFrame()
-        negative_df = pd.DataFrame()
-
-        # 먼저 끝나는 순서대로 결과 처리
+        # 도착 즉시 세션 상태 업데이트 + 컨테이너 렌더링
         for future in as_completed(future_to_type):
             task_type = future_to_type[future]
 
@@ -343,16 +369,32 @@ def load_product_analysis_async(
                 result = future.result()
 
                 if task_type == "REVIEW_POSITIVE":
-                    positive_df = result
                     st.session_state["_rep_positive_reviews_df_cache"] = result
+                    st.session_state["_analysis_cache_product_id"] = pid
+                    _render_single_review_section(
+                        container_pos_review,
+                        result,
+                        "positive",
+                        "😊 긍정 대표 리뷰",
+                        pid,
+                        skip_scroll_callback,
+                    )
 
                 elif task_type == "REVIEW_NEGATIVE":
-                    negative_df = result
                     st.session_state["_rep_negative_reviews_df_cache"] = result
+                    st.session_state["_analysis_cache_product_id"] = pid
+                    _render_single_review_section(
+                        container_neg_review,
+                        result,
+                        "negative",
+                        "😟 부정 대표 리뷰",
+                        pid,
+                        skip_scroll_callback,
+                    )
 
                 elif task_type == "TREND":
                     st.session_state["_reviews_df_cache"] = result
-                    st.session_state["_analysis_cache_product_id"] = str(product_id)
+                    st.session_state["_analysis_cache_product_id"] = pid
                     render_rating_trend(container_trend, result, skip_scroll_callback)
 
                 elif task_type == "RECO":
@@ -361,23 +403,35 @@ def load_product_analysis_async(
                         if isinstance(result, list)
                         else [item for items in result.values() for item in items]
                     )
+                    # 즉시 세션 업데이트 → fragment가 바로 감지
                     st.session_state["reco_cache"] = reco_list
                     st.session_state["reco_target_product_id"] = product_id
+                    # 추천 섹션 fragment가 사용하는 cache_key도 동기화 (현재 상품 카테고리 기준)
+                    current_category = (
+                        product_info.get("sub_category")
+                        if pd.notna(product_info.get("sub_category"))
+                        else None
+                    )
+                    st.session_state["reco_cache_key"] = (
+                        "product",
+                        product_id,
+                        tuple([current_category]) if current_category else None,
+                    )
 
             except Exception as e:
                 if task_type == "REVIEW_POSITIVE":
                     st.session_state["_rep_positive_reviews_df_cache"] = pd.DataFrame()
+                    with container_pos_review.container():
+                        st.markdown("#### 😊 긍정 대표 리뷰")
+                        st.error(f"로드 실패: {e}")
                 elif task_type == "REVIEW_NEGATIVE":
                     st.session_state["_rep_negative_reviews_df_cache"] = pd.DataFrame()
+                    with container_neg_review.container():
+                        st.markdown("#### 😟 부정 대표 리뷰")
+                        st.error(f"로드 실패: {e}")
                 elif task_type == "TREND":
                     with container_trend.container():
                         st.markdown("### 📈 평점 추이")
                         st.error(f"평점 추이 로드 실패: {e}")
                 elif task_type == "RECO":
                     st.error(f"추천 상품 로드 실패: {e}")
-
-        # 모든 리뷰가 로드된 후 렌더링
-        st.session_state["_analysis_cache_product_id"] = str(product_id)
-        render_representative_review(
-            container_review, positive_df, negative_df, skip_scroll_callback
-        )
