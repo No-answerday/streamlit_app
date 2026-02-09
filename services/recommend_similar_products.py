@@ -27,6 +27,18 @@ def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
         vec1 = np.array(vec1)
     if isinstance(vec2, list):
         vec2 = np.array(vec2)
+    
+    # 벡터가 문자열인 경우 (예: "[-0.1676, ...]") numpy 배열로 변환
+    if isinstance(vec1, str):
+        try:
+            vec1 = np.array(eval(vec1))
+        except:
+            return 0.0
+    if isinstance(vec2, str):
+        try:
+            vec2 = np.array(eval(vec2))
+        except:
+            return 0.0
 
     # 0 벡터인 경우 처리
     norm1 = np.linalg.norm(vec1)
