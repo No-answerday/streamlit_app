@@ -168,107 +168,120 @@ def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callbac
         min_date = review_df["date"].min().date()
         max_date = review_df["date"].max().date()
 
-        # product_id + 렌더 카운터
         pid = st.session_state.get("_analysis_cache_product_id", "unknown")
-        render_key = st.session_state.get("_rating_render_key", 0)
-        st.session_state["_rating_render_key"] = render_key + 1
 
-        freq_key = f"rating_freq_{pid}_{render_key}"
-        date_key = f"rating_date_{pid}_{render_key}"
-        reset_key = f"rating_reset_{pid}_{render_key}"
+        # fragment로 UI 부분만 분리
+        _render_rating_trend_ui(
+            review_df, min_date, max_date, pid, skip_scroll_callback
+        )
 
-        col_left, col_mid, col_right, _ = st.columns([1, 1, 1, 1])
 
-        with col_left:
-            freq_label = st.selectbox(
-                "평균 기준",
-                ["일간", "주간", "월간"],
-                index=2,
-                key=freq_key,
-                on_change=skip_scroll_callback,
+@st.fragment
+def _render_rating_trend_ui(
+    review_df: pd.DataFrame, min_date, max_date, pid: str, skip_scroll_callback
+):
+    """평점 추이 UI 렌더링 (fragment로 독립 실행)"""
+    freq_key = f"rating_freq_{pid}"
+    date_key = f"rating_date_{pid}"
+    reset_key = f"rating_reset_{pid}"
+
+    col_left, col_mid, col_right, _ = st.columns([1, 1, 1, 1])
+
+    with col_left:
+        freq_label = st.selectbox(
+            "평균 기준",
+            ["일간", "주간", "월간"],
+            index=2,
+            key=freq_key,
+        )
+
+    freq_map = {
+        "일간": ("D", 7),
+        "주간": ("W", 4),
+        "월간": ("ME", 3),
+    }
+    freq, ma_window = freq_map[freq_label]
+
+    DATE_RANGE_KEY = f"rating_date_range_{pid}"
+    default_date_range = (min_date, max_date)
+
+    # 저장된 날짜 범위가 있으면 사용, 없으면 기본값
+    if DATE_RANGE_KEY not in st.session_state:
+        st.session_state[DATE_RANGE_KEY] = default_date_range
+
+    with col_mid:
+        date_range = st.date_input(
+            "기간 선택",
+            value=st.session_state[DATE_RANGE_KEY],
+            min_value=min_date,
+            max_value=max_date,
+            key=date_key,
+        )
+
+    def reset_date_range():
+        skip_scroll_callback()
+        st.session_state[DATE_RANGE_KEY] = default_date_range
+
+    with col_right:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.button(
+            "↺",
+            key=reset_key,
+            help="날짜 초기화",
+            on_click=reset_date_range,
+        )
+
+    trend_df = pd.DataFrame()
+    is_date_range_ready = False
+
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        is_date_range_ready = True
+        start_date, end_date = date_range
+        start_date = pd.to_datetime(start_date)
+        end_date = pd.to_datetime(end_date)
+
+        # 날짜 범위 저장
+        st.session_state[DATE_RANGE_KEY] = (start_date.date(), end_date.date())
+
+        date_df = review_df.loc[
+            (review_df["date"] >= start_date) & (review_df["date"] <= end_date)
+        ]
+        if not date_df.empty:
+            trend_df = rating_trend(date_df, freq=freq, ma_window=ma_window)
+    else:
+        st.info("마지막 날짜를 선택해주세요.📆")
+
+    if is_date_range_ready and not trend_df.empty:
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=trend_df["date"],
+                y=trend_df["avg_score"],
+                name=f"{freq_label} 평균",
+                marker_color="slateblue",
+                opacity=0.4,
             )
-
-        freq_map = {
-            "일간": ("D", 7),
-            "주간": ("W", 4),
-            "월간": ("ME", 3),
-        }
-        freq, ma_window = freq_map[freq_label]
-
-        DATE_RANGE_KEY = "rating_date_range"
-        default_date_range = (min_date, max_date)
-
-        with col_mid:
-            date_range = st.date_input(
-                "기간 선택",
-                value=default_date_range,
-                min_value=min_date,
-                max_value=max_date,
-                key=date_key,
-                on_change=skip_scroll_callback,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=trend_df["date"],
+                y=trend_df["ma"],
+                mode="lines",
+                name=f"추세 ({ma_window}개{freq_label} 이동평균)",
+                line=dict(color="royalblue", width=3),
             )
-
-        def reset_date_range():
-            skip_scroll_callback()
-            st.session_state[DATE_RANGE_KEY] = (min_date, max_date)
-
-        with col_right:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.button(
-                "↺",
-                key=reset_key,
-                help="날짜 초기화",
-                on_click=reset_date_range,
-            )
-
-        trend_df = pd.DataFrame()
-        is_date_range_ready = False
-
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            is_date_range_ready = True
-            start_date, end_date = date_range
-            start_date = pd.to_datetime(start_date)
-            end_date = pd.to_datetime(end_date)
-
-            date_df = review_df.loc[
-                (review_df["date"] >= start_date) & (review_df["date"] <= end_date)
-            ]
-            if not date_df.empty:
-                trend_df = rating_trend(date_df, freq=freq, ma_window=ma_window)
-        else:
-            st.info("마지막 날짜를 선택해주세요.📆")
-
-        if is_date_range_ready and not trend_df.empty:
-            fig = go.Figure()
-            fig.add_trace(
-                go.Bar(
-                    x=trend_df["date"],
-                    y=trend_df["avg_score"],
-                    name=f"{freq_label} 평균",
-                    marker_color="slateblue",
-                    opacity=0.4,
-                )
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=trend_df["date"],
-                    y=trend_df["ma"],
-                    mode="lines",
-                    name=f"추세 ({ma_window}개{freq_label} 이동평균)",
-                    line=dict(color="royalblue", width=3),
-                )
-            )
-            fig.update_layout(
-                yaxis=dict(range=[1, 5.1]),
-                xaxis_title="날짜",
-                yaxis_title="평균 평점",
-                hovermode="x unified",
-                template="plotly_white",
-                height=350,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        elif is_date_range_ready and trend_df.empty:
-            st.info("선택한 기간에 대한 평점 데이터가 없습니다.")
+        )
+        fig.update_layout(
+            yaxis=dict(range=[1, 5.1]),
+            xaxis_title="날짜",
+            yaxis_title="평균 평점",
+            hovermode="x unified",
+            template="plotly_white",
+            height=350,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    elif is_date_range_ready and trend_df.empty:
+        st.info("선택한 기간에 대한 평점 데이터가 없습니다.")
 
 
 def load_product_analysis_async(
