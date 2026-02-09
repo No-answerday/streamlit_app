@@ -109,11 +109,8 @@ def select_product_from_reco(product_name: str):
 
 
 @st.fragment
-def render_recommendation_section(df: pd.DataFrame, selected_product: str):
-    """추천 상품 섹션 렌더링 (fragment)"""
-    st.markdown("---")
-    st.subheader("👍 이 상품과 유사한 추천 상품")
-
+def _render_reco_filters_and_data(df: pd.DataFrame, selected_product: str):
+    """추천 필터/정렬 UI 및 데이터 준비 (fragment - 부분 재렌더)"""
     col_1, col_2, col_3 = st.columns([5, 2, 3])
 
     with col_2:
@@ -156,7 +153,7 @@ def render_recommendation_section(df: pd.DataFrame, selected_product: str):
             st.session_state["reco_cache"] = []
 
         selected_categories = st.selectbox(
-            "",
+            "카테고리 선택",
             all_categories,
             index=default_index,
             key="reco_category_select",
@@ -165,7 +162,6 @@ def render_recommendation_section(df: pd.DataFrame, selected_product: str):
         )
 
     # 추천 상품 조회
-    # 캐시가 있으면 사용, 없으면 로딩 중 표시
     product_rows = df[df["product_name"] == selected_product]
     if not product_rows.empty:
         target_product_id = product_rows.iloc[0]["product_id"]
@@ -182,7 +178,7 @@ def render_recommendation_section(df: pd.DataFrame, selected_product: str):
             # 비동기 작업 자체가 아직 완료되지 않은 경우
             if st.session_state.get("reco_target_product_id") != target_product_id:
                 st.info("🔍 유사한 상품을 찾고 있습니다...")
-                return
+                return None
 
             # 같은 제품의 전체 캐시(categories=None)가 이미 있으면 재검색 없이 필터만 적용
             reco_list = st.session_state.get("reco_cache", [])
@@ -204,7 +200,7 @@ def render_recommendation_section(df: pd.DataFrame, selected_product: str):
             )
     else:
         st.warning("선택한 제품 정보를 찾을 수 없습니다.")
-        return
+        return None
 
     # reco_score / similarity 컬럼 방어적 보정
     if "reco_score" not in reco_df_view.columns:
@@ -221,7 +217,20 @@ def render_recommendation_section(df: pd.DataFrame, selected_product: str):
     else:
         reco_df_view = sort_products(reco_df_view, sort_option)
 
-    render_recommendations_grid(reco_df_view, select_product_from_reco)
+    return reco_df_view
+
+
+def render_recommendation_section(df: pd.DataFrame, selected_product: str):
+    """추천 상품 섹션 렌더링"""
+    st.markdown("---")
+    st.subheader("👍 이 상품과 유사한 추천 상품")
+
+    # Fragment: 필터/정렬 UI 및 데이터 준비 (부분 재렌더)
+    reco_df_view = _render_reco_filters_and_data(df, selected_product)
+
+    # Fragment 밖: 상품 그리드 렌더링 (전체 rerun 가능)
+    if reco_df_view is not None:
+        render_recommendations_grid(reco_df_view, select_product_from_reco)
 
 
 # =========================
