@@ -1,157 +1,122 @@
 """
-Hugging Face Inference API를 사용한 벡터화 모듈 (직접 REST API 호출)
+Hugging Face Hub 모델 다운로드 기반 벡터화 모듈
+- HF Hub에서 모델을 자동 다운로드하여 로컬 추론
+- API 엔드포인트 의존 없음 (410/404 에러 원천 차단)
+- 로컬/Streamlit Cloud 모두 동일하게 동작
 """
 
 import numpy as np
-import requests
+from transformers import AutoTokenizer, AutoModel
+import torch
 from typing import List, Optional
 import os
-import time
 
 
 class HuggingFaceAPIVectorizer:
     """
-    Hugging Face Inference API를 사용한 벡터화 클래스
-    직접 REST API 호출 방식 (커스텀 모델 지원)
-    """
+    Hugging Face Hub에서 모델을 다운로드하여 로컬 추론하는 벡터화 클래스
 
-    API_URL_TEMPLATE = "https://api-inference.huggingface.co/models/{model_id}"
+    - API 호출 대신 모델 파일을 직접 다운로드 후 추론
+    - torch + transformers 사용 (BERTVectorizer와 동일한 추론 방식)
+    - 최초 1회만 다운로드, 이후 HF 캐시에서 로드
+    """
 
     def __init__(
         self,
-        model_id: str,
+        model_id: str = "fullfish/multicampus_semantic",
         api_token: Optional[str] = None,
     ):
         """
         Args:
             model_id: Hugging Face 모델 ID (예: "fullfish/multicampus_semantic")
-            api_token: Hugging Face API 토큰 (환경변수 HF_TOKEN에서 자동 로드)
+            api_token: Hugging Face API 토큰 (private 모델일 경우 필요)
         """
         self.model_id = model_id
-
-        # API 토큰 로드
         self.api_token = api_token or os.getenv("HF_TOKEN")
-        if not self.api_token:
-            raise ValueError(
-                "Hugging Face API 토큰이 필요합니다. "
-                "환경변수 HF_TOKEN을 설정하거나 api_token 파라미터를 전달하세요."
-            )
 
-        self.api_url = self.API_URL_TEMPLATE.format(model_id=model_id)
-        self.headers = {"Authorization": f"Bearer {self.api_token}"}
+        print(f"🔄 Hugging Face Hub에서 모델 다운로드 중: {model_id}")
 
-        print(f"✓ Hugging Face API Vectorizer 초기화 완료")
+        # HF Hub에서 모델 + 토크나이저 다운로드 (캐시됨)
+        token = self.api_token if self.api_token else None
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id, token=token)
+        self.model = AutoModel.from_pretrained(model_id, token=token)
+        self.model.eval()
+
+        # CPU 사용 (Streamlit Cloud는 GPU 없음)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+
+        if self.device.type == "cuda":
+            self.model.half()
+
+        print(f"✓ 모델 로딩 완료")
         print(f"  - Model: {model_id}")
-        print(f"  - API URL: {self.api_url}")
+        print(f"  - Device: {self.device}")
+        print(f"  - Hidden Size: {self.model.config.hidden_size}")
 
-    def _query(self, text: str) -> dict:
-        """Hugging Face Inference API에 직접 POST 요청"""
-        payload = {
-            "inputs": text,
-            "options": {"wait_for_model": True},
-        }
-        response = requests.post(
-            self.api_url, headers=self.headers, json=payload, timeout=60
-        )
-        response.raise_for_status()
-        return response.json()
-
-    def encode(self, text: str, max_retries: int = 3) -> np.ndarray:
+    def encode(self, text: str, max_length: int = 512) -> np.ndarray:
         """
-        단일 텍스트를 벡터로 변환 (API 호출)
+        단일 텍스트를 벡터로 변환 (Mean Pooling)
 
         Args:
             text: 입력 텍스트
-            max_retries: API 실패 시 재시도 횟수
+            max_length: 최대 토큰 길이
 
         Returns:
-            768차원 벡터 (또는 모델에 따라 다른 차원)
+            768차원 벡터 (모델에 따라 다를 수 있음)
         """
         if not text or not text.strip():
-            return np.zeros(768)  # 빈 텍스트는 zero 벡터
+            return np.zeros(self.model.config.hidden_size)
 
-        for attempt in range(max_retries):
-            try:
-                result = self._query(text)
+        # 토큰화
+        inputs = self.tokenizer(
+            text,
+            return_tensors="pt",
+            max_length=max_length,
+            truncation=True,
+            padding=True,
+        )
 
-                # numpy 배열로 변환
-                embedding = np.array(result)
+        # 디바이스로 이동
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-                # 3D (1 x tokens x hidden) → squeeze 후 mean pooling
-                if embedding.ndim == 3:
-                    embedding = embedding.squeeze(0)  # (tokens, hidden)
-                    return np.mean(embedding, axis=0)
-                # 2D (tokens x hidden) → Mean Pooling
-                elif embedding.ndim == 2:
-                    return np.mean(embedding, axis=0)
-                # 1D (이미 문장 벡터) → 그대로 반환
-                elif embedding.ndim == 1:
-                    return embedding
-                else:
-                    return np.zeros(768)
+        # 추론
+        with torch.no_grad():
+            outputs = self.model(**inputs, return_dict=True)
 
-            except requests.exceptions.HTTPError as e:
-                error_msg = str(e)
-                status_code = e.response.status_code if e.response is not None else 0
+        # Mean Pooling (attention_mask 고려)
+        attention_mask = inputs["attention_mask"]
+        token_embeddings = outputs.last_hidden_state
 
-                # 모델 로딩 중 (503)
-                if status_code == 503:
-                    if attempt < max_retries - 1:
-                        wait_time = 10 * (attempt + 1)  # 10초, 20초, 30초
-                        print(
-                            f"⏳ 모델 로딩 중... {wait_time}초 후 재시도 ({attempt+1}/{max_retries})"
-                        )
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(
-                            f"모델 로딩 타임아웃. "
-                            f"Hugging Face에서 모델이 아직 준비되지 않았습니다. "
-                            f"1-2분 후 다시 시도해주세요. 원본 에러: {error_msg}"
-                        )
+        input_mask_expanded = (
+            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        )
+        sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, dim=1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(dim=1), min=1e-9)
 
-                # 429 Rate Limit
-                if status_code == 429:
-                    if attempt < max_retries - 1:
-                        wait_time = 5 * (attempt + 1)
-                        print(f"⏳ Rate limit - {wait_time}초 후 재시도")
-                        time.sleep(wait_time)
-                        continue
-
-                raise Exception(
-                    f"API 호출 실패 (HTTP {status_code}): {error_msg}"
-                )
-
-            except Exception as e:
-                error_msg = str(e)
-
-                # 기타 오류
-                if attempt < max_retries - 1:
-                    print(
-                        f"⚠️ 오류 발생 - 재시도 중... ({attempt+1}/{max_retries}): {error_msg}"
-                    )
-                    time.sleep(3)
-                    continue
-                else:
-                    raise Exception(f"API 호출 실패 ({type(e).__name__}): {error_msg}")
-
-        raise Exception("API 호출 최대 재시도 횟수 초과")
+        mean_embedding = (sum_embeddings / sum_mask).cpu().numpy()[0]
+        return mean_embedding
 
     def encode_batch(
-        self, texts: List[str], batch_size: int = 8, show_progress: bool = False
+        self,
+        texts: List[str],
+        batch_size: int = 16,
+        max_length: int = 512,
+        show_progress: bool = False,
     ) -> np.ndarray:
         """
-        여러 텍스트를 배치로 벡터화 (API 호출)
+        여러 텍스트를 배치로 벡터화
 
         Args:
             texts: 입력 텍스트 리스트
-            batch_size: 배치 크기 (API 제한 고려)
+            batch_size: 배치 크기
+            max_length: 최대 토큰 길이
             show_progress: 진행상황 표시 여부
 
         Returns:
-            (len(texts), embedding_dim) 크기의 numpy 배열
+            (len(texts), hidden_size) 크기의 numpy 배열
         """
-        embeddings = []
+        all_embeddings = []
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
@@ -159,18 +124,42 @@ class HuggingFaceAPIVectorizer:
             if show_progress:
                 print(f"처리 중: {i}/{len(texts)}")
 
-            for text in batch:
-                emb = self.encode(text)
-                embeddings.append(emb)
+            # 빈 텍스트 처리
+            processed = [t if t and t.strip() else " " for t in batch]
 
-            # API Rate Limit 방지
-            time.sleep(0.5)
+            inputs = self.tokenizer(
+                processed,
+                return_tensors="pt",
+                max_length=max_length,
+                truncation=True,
+                padding=True,
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        return np.array(embeddings)
+            with torch.no_grad():
+                outputs = self.model(**inputs, return_dict=True)
+
+            attention_mask = inputs["attention_mask"]
+            token_embeddings = outputs.last_hidden_state
+
+            input_mask_expanded = (
+                attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            )
+            sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, dim=1)
+            sum_mask = torch.clamp(input_mask_expanded.sum(dim=1), min=1e-9)
+
+            batch_embeddings = (sum_embeddings / sum_mask).cpu().numpy()
+            all_embeddings.append(batch_embeddings)
+
+        return np.vstack(all_embeddings)
+
+    def get_vector_size(self) -> int:
+        """벡터 차원 반환"""
+        return self.model.config.hidden_size
 
 
 # 싱글톤 인스턴스 캐싱
-_hf_api_vectorizer_instance = None
+_hf_vectorizer_instance = None
 
 
 def get_hf_api_vectorizer(
@@ -178,20 +167,20 @@ def get_hf_api_vectorizer(
     api_token: Optional[str] = None,
 ) -> HuggingFaceAPIVectorizer:
     """
-    Hugging Face API Vectorizer 싱글톤 인스턴스 반환
+    HuggingFaceAPIVectorizer 싱글톤 인스턴스 반환
 
     Args:
         model_id: Hugging Face 모델 ID
-        api_token: Hugging Face API 토큰 (선택, 환경변수에서 자동 로드)
+        api_token: Hugging Face API 토큰 (private 모델일 경우 필요)
 
     Returns:
         HuggingFaceAPIVectorizer 인스턴스
     """
-    global _hf_api_vectorizer_instance
+    global _hf_vectorizer_instance
 
-    if _hf_api_vectorizer_instance is None:
-        _hf_api_vectorizer_instance = HuggingFaceAPIVectorizer(
+    if _hf_vectorizer_instance is None:
+        _hf_vectorizer_instance = HuggingFaceAPIVectorizer(
             model_id=model_id, api_token=api_token
         )
 
-    return _hf_api_vectorizer_instance
+    return _hf_vectorizer_instance
