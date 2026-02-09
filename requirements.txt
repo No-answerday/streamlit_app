@@ -8,3 +8,5 @@ torch
 transformers
 huggingface_hub
 sentencepiece
+requests  # Hugging Face API 호출용
+python-dotenv  # 환경변수 로드용

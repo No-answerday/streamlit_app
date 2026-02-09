@@ -278,27 +278,49 @@ def main():
     # 문맥 검색일 때 미리 검색 수행
     if search_type_pre == "문맥" and search_keyword_pre:
         try:
-            # BERTVectorizer 로드 (services 폴더에서)
-            from services.bert_vectorizer import BERTVectorizer
+            # 환경변수에서 USE_HF_API 설정 확인 (기본: 로컬)
+            use_hf_api = os.getenv("USE_HF_API", "false").lower() == "true"
 
             # 세션에 vectorizer가 없으면 로드
             if "vectorizer" not in st.session_state:
                 with st.spinner("AI 모델을 로딩중입니다..."):
-                    # 모델 경로 확인
-                    import os
+                    if use_hf_api:
+                        # Hugging Face API 사용
+                        from services.hf_api_vectorizer import get_hf_api_vectorizer
 
-                    model_path = "./models/fine_tuned/roberta_semantic_final"
-
-                    if not os.path.exists(model_path):
-                        st.error(
-                            "⚠️ 문맥 검색 모델을 찾을 수 없습니다.\n\n"
-                            "모델 파일이 필요합니다. 자세한 내용은 MODELS_README.md를 참조하세요."
+                        hf_model_id = os.getenv(
+                            "HF_MODEL_ID", "fullfish/multicampus_semantic"
                         )
-                        st.session_state.vectorizer = None
+                        try:
+                            st.session_state.vectorizer = get_hf_api_vectorizer(
+                                model_id=hf_model_id
+                            )
+                            st.success(f"✓ API 모델 연결 완료: {hf_model_id}")
+                        except Exception as e:
+                            st.error(f"⚠️ Hugging Face API 연결 실패: {e}")
+                            st.session_state.vectorizer = None
                     else:
-                        st.session_state.vectorizer = BERTVectorizer(
-                            model_name=model_path
-                        )
+                        # 로컬 모델 사용 (기존 방식)
+                        from services.bert_vectorizer import BERTVectorizer
+
+                        model_path = "./models/fine_tuned/roberta_semantic_final"
+
+                        if not os.path.exists(model_path):
+                            st.error(
+                                "⚠️ 문맥 검색 모델을 찾을 수 없습니다.\n\n"
+                                "모델 파일이 필요합니다. 자세한 내용은 MODELS_README.md를 참조하세요.\n\n"
+                                "💡 Hugging Face API를 사용하려면 환경변수를 설정하세요:\n"
+                                "```\n"
+                                "USE_HF_API=true\n"
+                                "HF_TOKEN=your_token\n"
+                                "HF_MODEL_ID=your-username/roberta-semantic-final\n"
+                                "```"
+                            )
+                            st.session_state.vectorizer = None
+                        else:
+                            st.session_state.vectorizer = BERTVectorizer(
+                                model_name=model_path
+                            )
 
             # vectorizer가 로드되지 않았으면 문맥 검색 건너뛰기
             if st.session_state.vectorizer is None:
