@@ -61,39 +61,46 @@ class HuggingFaceAPIVectorizer:
                 # feature_extraction: 문장 임베딩 반환
                 response = self.client.feature_extraction(text)
 
-                # Mean Pooling 적용 (토큰 벡터들의 평균)
-                if isinstance(response, list) and len(response) > 0:
-                    embedding = np.mean(np.array(response), axis=0)
+                # numpy 배열로 변환
+                embedding = np.array(response)
+
+                # 2D (토큰 x hidden) → Mean Pooling
+                if embedding.ndim == 2:
+                    return np.mean(embedding, axis=0)
+                # 1D (이미 문장 벡터) → 그대로 반환
+                elif embedding.ndim == 1:
                     return embedding
                 else:
-                    return (
-                        np.array(response)
-                        if isinstance(response, list)
-                        else np.zeros(768)
-                    )
+                    return np.zeros(768)
 
             except Exception as e:
-                error_msg = str(e).lower()
+                error_msg = str(e)
 
-                # 모델 로딩 중
-                if "loading" in error_msg or "503" in error_msg:
+                # 모델 로딩 중 (503)
+                if "loading" in error_msg.lower() or "503" in error_msg:
                     if attempt < max_retries - 1:
-                        wait_time = 2**attempt
+                        wait_time = 5 * (attempt + 1)  # 5초, 10초, 15초
                         print(
                             f"⏳ 모델 로딩 중... {wait_time}초 후 재시도 ({attempt+1}/{max_retries})"
                         )
                         time.sleep(wait_time)
                         continue
                     else:
-                        raise Exception("모델 로딩 타임아웃. 나중에 다시 시도해주세요.")
+                        raise Exception(
+                            f"모델 로딩 타임아웃 (30초 대기). "
+                            f"Hugging Face에서 모델이 아직 준비되지 않았습니다. "
+                            f"1-2분 후 다시 시도해주세요. 원본 에러: {error_msg}"
+                        )
 
                 # 기타 오류
                 if attempt < max_retries - 1:
-                    print(f"⚠️ 오류 발생 - 재시도 중... ({attempt+1}/{max_retries})")
-                    time.sleep(2)
+                    print(
+                        f"⚠️ 오류 발생 - 재시도 중... ({attempt+1}/{max_retries}): {error_msg}"
+                    )
+                    time.sleep(3)
                     continue
                 else:
-                    raise Exception(f"API 호출 실패: {e}")
+                    raise Exception(f"API 호출 실패 ({type(e).__name__}): {error_msg}")
 
         raise Exception("API 호출 최대 재시도 횟수 초과")
 
