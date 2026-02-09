@@ -25,37 +25,45 @@ def render_top_keywords(product_info: pd.Series):
 
 
 def render_representative_review(
-    container,
+    container_pos,
+    container_neg,
     positive_reviews_df: pd.DataFrame,
     negative_reviews_df: pd.DataFrame,
     skip_scroll_callback,
 ):
-    """대표 리뷰 렌더링 (긍정/부정 분리)"""
+    """대표 리뷰 렌더링 (긍정/부정 독립 컨테이너)"""
+    pid = st.session_state.get("_analysis_cache_product_id", "unknown")
+
+    _render_single_review_section(
+        container_pos,
+        positive_reviews_df,
+        "positive",
+        "😊 긍정 대표 리뷰",
+        pid,
+        skip_scroll_callback,
+    )
+    _render_single_review_section(
+        container_neg,
+        negative_reviews_df,
+        "negative",
+        "😟 부정 대표 리뷰",
+        pid,
+        skip_scroll_callback,
+    )
+
+
+def _render_single_review_section(
+    container, reviews_df, review_type, title, pid, skip_scroll_callback
+):
+    """단일 리뷰 타입 섹션 렌더링"""
     with container.container():
-        st.markdown("### ✒️ 대표 리뷰")
-
-        # 탭으로 긍정/부정 구분
-        tab_positive, tab_negative = st.tabs(["😊 긍정 리뷰", "😟 부정 리뷰"])
-
-        pid = st.session_state.get("_analysis_cache_product_id", "unknown")
-
-        # 긍정 리뷰 탭
-        with tab_positive:
-            if positive_reviews_df is None or positive_reviews_df.empty:
-                st.info("긍정 대표 리뷰가 없습니다.")
-            else:
-                _render_review_pagination(
-                    positive_reviews_df, "positive", pid, skip_scroll_callback
-                )
-
-        # 부정 리뷰 탭
-        with tab_negative:
-            if negative_reviews_df is None or negative_reviews_df.empty:
-                st.info("부정 대표 리뷰가 없습니다.")
-            else:
-                _render_review_pagination(
-                    negative_reviews_df, "negative", pid, skip_scroll_callback
-                )
+        st.markdown(f"#### {title}")
+        if reviews_df is None or reviews_df.empty:
+            st.info(f"{title}가 없습니다.")
+        else:
+            _render_review_pagination(
+                reviews_df, review_type, pid, skip_scroll_callback
+            )
 
 
 @st.fragment
@@ -288,53 +296,56 @@ def load_product_analysis_async(
     product_id: str,
     product_info: pd.Series,
     review_id,
-    container_review,
+    container_pos_review,
+    container_neg_review,
     container_trend,
     skip_scroll_callback,
 ):
     """
     비동기로 대표 리뷰, 평점 추이, 추천 상품 로드
+    각 컨테이너에 도착 즉시 렌더링
 
     Args:
         product_id: 제품 ID
         product_info: 제품 정보 Series
         review_id: 대표 리뷰 ID
-        container_review: 대표 리뷰 placeholder
+        container_pos_review: 긍정 리뷰 placeholder
+        container_neg_review: 부정 리뷰 placeholder
         container_trend: 평점 추이 placeholder
         skip_scroll_callback: 스크롤 스킵 콜백
     """
     # 초기 로딩 메시지 표시
-    with container_review.container():
-        st.markdown("### ✒️ 대표 리뷰")
-        st.info("✒️ 대표 리뷰를 분석 중입니다...")
+    with container_pos_review.container():
+        st.markdown("#### 😊 긍정 대표 리뷰")
+        st.info("긍정 대표 리뷰를 불러오는 중...")
+
+    with container_neg_review.container():
+        st.markdown("#### 😟 부정 대표 리뷰")
+        st.info("부정 대표 리뷰를 불러오는 중...")
 
     with container_trend.container():
         st.markdown("### 📈 평점 추이")
-        st.info("📈 평점 데이터를 불러오는 중입니다...")
+        st.info("📈 평점 데이터를 불러오는 중...")
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    pid = str(product_id)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
         future_to_type = {}
 
-        # 1. 긍정 대표 리뷰 요청
         if product_id:
             f_pos = executor.submit(
-                load_top_reviews_athena, str(product_id), product_info, 5, "positive"
+                load_top_reviews_athena, pid, product_info, 5, "positive"
             )
             future_to_type[f_pos] = "REVIEW_POSITIVE"
 
-        # 2. 부정 대표 리뷰 요청
-        if product_id:
             f_neg = executor.submit(
-                load_top_reviews_athena, str(product_id), product_info, 5, "negative"
+                load_top_reviews_athena, pid, product_info, 5, "negative"
             )
             future_to_type[f_neg] = "REVIEW_NEGATIVE"
 
-        # 3. 평점 추이 데이터 요청
-        if product_id:
-            f_trend = executor.submit(load_reviews_athena, str(product_id))
+            f_trend = executor.submit(load_reviews_athena, pid)
             future_to_type[f_trend] = "TREND"
 
-        # 4. 추천 상품 요청 (캐시 체크)
         if product_id and st.session_state.get("reco_target_product_id") != product_id:
             f_reco = executor.submit(
                 recommend_similar_products,
@@ -344,11 +355,7 @@ def load_product_analysis_async(
             )
             future_to_type[f_reco] = "RECO"
 
-        # 리뷰 데이터 저장용
-        positive_df = pd.DataFrame()
-        negative_df = pd.DataFrame()
-
-        # 먼저 끝나는 순서대로 결과 처리
+        # 도착 즉시 세션 상태 업데이트 + 컨테이너 렌더링
         for future in as_completed(future_to_type):
             task_type = future_to_type[future]
 
@@ -356,16 +363,32 @@ def load_product_analysis_async(
                 result = future.result()
 
                 if task_type == "REVIEW_POSITIVE":
-                    positive_df = result
                     st.session_state["_rep_positive_reviews_df_cache"] = result
+                    st.session_state["_analysis_cache_product_id"] = pid
+                    _render_single_review_section(
+                        container_pos_review,
+                        result,
+                        "positive",
+                        "😊 긍정 대표 리뷰",
+                        pid,
+                        skip_scroll_callback,
+                    )
 
                 elif task_type == "REVIEW_NEGATIVE":
-                    negative_df = result
                     st.session_state["_rep_negative_reviews_df_cache"] = result
+                    st.session_state["_analysis_cache_product_id"] = pid
+                    _render_single_review_section(
+                        container_neg_review,
+                        result,
+                        "negative",
+                        "😟 부정 대표 리뷰",
+                        pid,
+                        skip_scroll_callback,
+                    )
 
                 elif task_type == "TREND":
                     st.session_state["_reviews_df_cache"] = result
-                    st.session_state["_analysis_cache_product_id"] = str(product_id)
+                    st.session_state["_analysis_cache_product_id"] = pid
                     render_rating_trend(container_trend, result, skip_scroll_callback)
 
                 elif task_type == "RECO":
@@ -374,23 +397,30 @@ def load_product_analysis_async(
                         if isinstance(result, list)
                         else [item for items in result.values() for item in items]
                     )
+                    # 즉시 세션 업데이트 → fragment가 바로 감지
                     st.session_state["reco_cache"] = reco_list
                     st.session_state["reco_target_product_id"] = product_id
+                    # 추천 섹션 fragment가 사용하는 cache_key도 동기화
+                    st.session_state["reco_cache_key"] = (
+                        "product",
+                        product_id,
+                        None,
+                    )
 
             except Exception as e:
                 if task_type == "REVIEW_POSITIVE":
                     st.session_state["_rep_positive_reviews_df_cache"] = pd.DataFrame()
+                    with container_pos_review.container():
+                        st.markdown("#### 😊 긍정 대표 리뷰")
+                        st.error(f"로드 실패: {e}")
                 elif task_type == "REVIEW_NEGATIVE":
                     st.session_state["_rep_negative_reviews_df_cache"] = pd.DataFrame()
+                    with container_neg_review.container():
+                        st.markdown("#### 😟 부정 대표 리뷰")
+                        st.error(f"로드 실패: {e}")
                 elif task_type == "TREND":
                     with container_trend.container():
                         st.markdown("### 📈 평점 추이")
                         st.error(f"평점 추이 로드 실패: {e}")
                 elif task_type == "RECO":
                     st.error(f"추천 상품 로드 실패: {e}")
-
-        # 모든 리뷰가 로드된 후 렌더링
-        st.session_state["_analysis_cache_product_id"] = str(product_id)
-        render_representative_review(
-            container_review, positive_df, negative_df, skip_scroll_callback
-        )

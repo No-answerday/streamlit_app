@@ -165,8 +165,46 @@ def render_recommendation_section(df: pd.DataFrame, selected_product: str):
         )
 
     # 추천 상품 조회
-    with st.spinner("정보를 불러오는 중입니다..."):
-        reco_df_view = get_recommendations(df, selected_product, [selected_categories])
+    # 캐시가 있으면 사용, 없으면 로딩 중 표시
+    product_rows = df[df["product_name"] == selected_product]
+    if not product_rows.empty:
+        target_product_id = product_rows.iloc[0]["product_id"]
+
+        # 캐시 키 확인
+        cache_key = (
+            "product",
+            target_product_id,
+            tuple([selected_categories]) if selected_categories else None,
+        )
+
+        # 캐시가 없고, 현재 제품과 다르면 새로 로드 (비동기 작업 완료 대기)
+        if st.session_state.get("reco_cache_key") != cache_key:
+            # 비동기 작업 자체가 아직 완료되지 않은 경우
+            if st.session_state.get("reco_target_product_id") != target_product_id:
+                st.info("🔍 유사한 상품을 찾고 있습니다...")
+                return
+
+            # 같은 제품의 전체 캐시(categories=None)가 이미 있으면 재검색 없이 필터만 적용
+            reco_list = st.session_state.get("reco_cache", [])
+            if reco_list:
+                # 캐시 키를 카테고리 필터 버전으로 갱신 (recommend_similar_products 재호출 방지)
+                st.session_state["reco_cache_key"] = cache_key
+                reco_df_view = get_recommendations(
+                    df, selected_product, [selected_categories]
+                )
+            else:
+                with st.spinner("정보를 불러오는 중입니다..."):
+                    reco_df_view = get_recommendations(
+                        df, selected_product, [selected_categories]
+                    )
+        else:
+            # 캐시 사용
+            reco_df_view = get_recommendations(
+                df, selected_product, [selected_categories]
+            )
+    else:
+        st.warning("선택한 제품 정보를 찾을 수 없습니다.")
+        return
 
     # reco_score / similarity 컬럼 방어적 보정
     if "reco_score" not in reco_df_view.columns:
@@ -364,7 +402,9 @@ def main():
             product_id = product_info.get("product_id", "")
             review_id = product_info.get("representative_review_id_roberta", None)
 
-            container_review = st.empty()
+            st.markdown("### ✒️ 대표 리뷰")
+            container_pos_review = st.empty()
+            container_neg_review = st.empty()
             container_trend = st.empty()
 
             # rerun시에도 캐시로 복구 렌더
@@ -376,7 +416,8 @@ def main():
                 neg_cache = st.session_state.get("_rep_negative_reviews_df_cache")
                 if pos_cache is not None or neg_cache is not None:
                     render_representative_review(
-                        container_review,
+                        container_pos_review,
+                        container_neg_review,
                         pos_cache if pos_cache is not None else pd.DataFrame(),
                         neg_cache if neg_cache is not None else pd.DataFrame(),
                         skip_scroll_apply_once,
@@ -409,7 +450,8 @@ def main():
                     product_id,
                     product_info,
                     review_id,
-                    container_review,
+                    container_pos_review,
+                    container_neg_review,
                     container_trend,
                     skip_scroll_apply_once,
                 )
