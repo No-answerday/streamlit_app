@@ -5,11 +5,17 @@ import glob
 from typing import List, Optional, Dict, Any
 from services.athena_queries import load_products_data_from_athena
 
-# BERTVectorizer 로드 (미세조정된 모델 사용)
+# BERTVectorizer 임포트 (로컬 모델 사용 시 필요, API 모드에서는 선택적)
 import sys
 
 sys.path.append("./services")
-from bert_vectorizer import BERTVectorizer
+
+try:
+    from bert_vectorizer import BERTVectorizer
+except (ImportError, Exception) as e:
+    # Streamlit Cloud나 API 전용 환경에서는 로드 실패 가능 (정상)
+    BERTVectorizer = None
+    print(f"[INFO] BERTVectorizer 로드 실패 (API 모드 사용 시 정상): {e}")
 
 
 def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
@@ -153,16 +159,16 @@ def recommend_similar_products(
         base_products = load_products_data_from_athena(
             categories=None, vector_type=vector_type
         )
-        
+
         target_product = base_products[base_products["product_id"] == product_id]
-        
+
         if target_product.empty:
             print(f"[오류] 상품 ID '{product_id}'를 찾을 수 없습니다.")
             return {}
-        
+
         target_product = target_product.iloc[0]
         print(f"✓ 기준 상품: {target_product.get('product_name', product_id)}")
-        
+
         # 비교 대상 상품은 categories로 필터링
         print(f"비교 대상 상품 로드 중... (카테고리: {categories or '전체'})")
         all_products = load_products_data_from_athena(
