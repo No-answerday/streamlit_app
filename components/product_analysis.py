@@ -16,7 +16,7 @@ from services.recommend_similar_products import recommend_similar_products
 
 def render_top_keywords(product_info: pd.Series):
     """대표 키워드 렌더링"""
-    st.markdown("---")
+    st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
     st.markdown("### 📃 대표 키워드")
     top_kw = product_info.get("top_keywords_str", [])
     if isinstance(top_kw, str):
@@ -39,6 +39,7 @@ def render_top_keywords(product_info: pd.Series):
                 """, 
                 unsafe_allow_html=True, 
             )
+    st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
 
 def render_representative_review(
     container_pos,
@@ -170,7 +171,7 @@ def _render_review_pagination(
 def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callback):
     """평점 추이 렌더링"""
     with container.container():
-        st.markdown("---")
+        st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
         st.markdown("### 📈 평점 추이")
 
         if (

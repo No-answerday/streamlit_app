@@ -113,7 +113,7 @@ def select_product_from_reco(product_name: str):
 
 def render_recommendation_section(df: pd.DataFrame, selected_product: str):
     """추천 상품 섹션 렌더링"""
-    st.markdown("---")
+    st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
     st.subheader("👍 이 상품과 유사한 추천 상품")
 
     col_1, col_2, col_3 = st.columns([5, 2, 3])
@@ -457,6 +457,9 @@ def main():
             # 대표 리뷰 & 평점 추이 (비동기 로드)
             product_id = product_info.get("product_id", "")
             review_id = product_info.get("representative_review_id_roberta", None)
+
+            st.markdown("### ✒️ 대표 리뷰")
+            st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
 
             container_pos_review = st.empty()
             container_neg_review = st.empty()
