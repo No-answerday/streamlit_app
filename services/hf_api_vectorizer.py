@@ -35,8 +35,12 @@ class HuggingFaceAPIVectorizer:
                 "환경변수 HF_TOKEN을 설정하거나 api_token 파라미터를 전달하세요."
             )
 
-        # InferenceClient 초기화 (자동으로 올바른 엔드포인트 사용)
-        self.client = InferenceClient(model=model_id, token=self.api_token)
+        # InferenceClient 초기화 (hf-inference provider 명시)
+        self.client = InferenceClient(
+            model=model_id,
+            token=self.api_token,
+            provider="hf-inference",
+        )
 
         print(f"✓ Hugging Face API Vectorizer 초기화 완료")
         print(f"  - Model: {model_id}")
