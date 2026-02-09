@@ -161,12 +161,14 @@ _hf_api_vectorizer_instance = None
 
 def get_hf_api_vectorizer(
     model_id: str = "fullfish/multicampus_semantic",
+    api_token: Optional[str] = None,
 ) -> HuggingFaceAPIVectorizer:
     """
     Hugging Face API Vectorizer 싱글톤 인스턴스 반환
 
     Args:
         model_id: Hugging Face 모델 ID
+        api_token: Hugging Face API 토큰 (선택, 환경변수에서 자동 로드)
 
     Returns:
         HuggingFaceAPIVectorizer 인스턴스
@@ -174,6 +176,8 @@ def get_hf_api_vectorizer(
     global _hf_api_vectorizer_instance
 
     if _hf_api_vectorizer_instance is None:
-        _hf_api_vectorizer_instance = HuggingFaceAPIVectorizer(model_id=model_id)
+        _hf_api_vectorizer_instance = HuggingFaceAPIVectorizer(
+            model_id=model_id, api_token=api_token
+        )
 
     return _hf_api_vectorizer_instance
