@@ -72,16 +72,12 @@ def render_search_bar(
                 display_options = product_options
 
             # 문맥 검색일 때는 라벨 변경
-            if search_type == "문맥" and search_keyword and context_search_results:
-                selectbox_label = f"유사 상품 ({len(context_search_results)}개)"
-            else:
-                selectbox_label = "일치 제품들"
+            selectbox_label = f"일치 상품 ({len(display_options)}개)"
 
             st.selectbox(
                 selectbox_label,
                 options=[""] + display_options,
                 key="product_search",
-                label_visibility="collapsed",
             )
             selected_product = st.session_state.get("product_search", "")
 
