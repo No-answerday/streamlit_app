@@ -291,12 +291,12 @@ def main():
             # USE_HF_API 설정 확인 (기본: 로컬)
             use_hf_api = get_config("USE_HF_API", "false").lower() == "true"
 
-            # 세션에 vectorizer가 없으면 로드
-            if "vectorizer" not in st.session_state:
-                with st.spinner("AI 모델을 로딩중입니다..."):
+            # 세션에 vectorizer가 없거나 None이면 (재)로드
+            if not st.session_state.get("vectorizer"):
+                with st.spinner("AI 모델 서버에 연결 중..."):
                     if use_hf_api:
                         # Hugging Face API 사용
-                        from services.hf_api_vectorizer import get_hf_api_vectorizer
+                        from services.hf_api_vectorizer import HuggingFaceAPIVectorizer
 
                         hf_model_id = get_config(
                             "HF_MODEL_ID", "fullfish/multicampus_semantic"
@@ -304,13 +304,12 @@ def main():
                         hf_token = get_config("HF_TOKEN")
 
                         try:
-                            st.session_state.vectorizer = get_hf_api_vectorizer(
+                            st.session_state.vectorizer = HuggingFaceAPIVectorizer(
                                 model_id=hf_model_id, api_token=hf_token
                             )
-                            st.success(f"✓ API 모델 연결 완료: {hf_model_id}")
                         except Exception as e:
                             st.error(f"⚠️ Hugging Face API 연결 실패: {e}")
-                            st.session_state.vectorizer = None
+                            st.session_state.pop("vectorizer", None)
                     else:
                         # 로컬 모델 사용 (기존 방식)
                         from services.bert_vectorizer import BERTVectorizer
@@ -328,14 +327,14 @@ def main():
                                 "HF_MODEL_ID=your-username/roberta-semantic-final\n"
                                 "```"
                             )
-                            st.session_state.vectorizer = None
+                            st.session_state.pop("vectorizer", None)
                         else:
                             st.session_state.vectorizer = BERTVectorizer(
                                 model_name=model_path
                             )
 
             # vectorizer가 로드되지 않았으면 문맥 검색 건너뛰기
-            if st.session_state.vectorizer is None:
+            if not st.session_state.get("vectorizer"):
                 st.warning(
                     "문맥 검색을 사용할 수 없습니다. 다른 검색 타입을 사용해주세요."
                 )
@@ -386,9 +385,14 @@ def main():
                     )
 
         except Exception as e:
+            import traceback
+
+            error_detail = traceback.format_exc()
             st.error(f"문맥 검색 중 오류가 발생했습니다: {str(e)}")
+            with st.expander("오류 상세 정보"):
+                st.code(error_detail)
             st.info("다른 검색 타입(상품명 또는 키워드)을 사용해주세요.")
-            st.session_state.vectorizer = None
+            st.session_state.pop("vectorizer", None)
 
     # 검색창 (문맥 검색 결과 전달)
     selected_product = render_search_bar(
