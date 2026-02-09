@@ -347,10 +347,16 @@ def load_product_analysis_async(
             future_to_type[f_trend] = "TREND"
 
         if product_id and st.session_state.get("reco_target_product_id") != product_id:
+            # 현재 상품의 카테고리로만 초기 검색 (성능 최적화)
+            current_category = (
+                product_info.get("sub_category")
+                if pd.notna(product_info.get("sub_category"))
+                else None
+            )
             f_reco = executor.submit(
                 recommend_similar_products,
                 product_id=product_id,
-                categories=None,
+                categories=[current_category] if current_category else None,
                 top_n=100,
             )
             future_to_type[f_reco] = "RECO"
@@ -400,11 +406,16 @@ def load_product_analysis_async(
                     # 즉시 세션 업데이트 → fragment가 바로 감지
                     st.session_state["reco_cache"] = reco_list
                     st.session_state["reco_target_product_id"] = product_id
-                    # 추천 섹션 fragment가 사용하는 cache_key도 동기화
+                    # 추천 섹션 fragment가 사용하는 cache_key도 동기화 (현재 상품 카테고리 기준)
+                    current_category = (
+                        product_info.get("sub_category")
+                        if pd.notna(product_info.get("sub_category"))
+                        else None
+                    )
                     st.session_state["reco_cache_key"] = (
                         "product",
                         product_id,
-                        None,
+                        tuple([current_category]) if current_category else None,
                     )
 
             except Exception as e:
