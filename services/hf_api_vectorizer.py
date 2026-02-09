@@ -1,9 +1,9 @@
 """
-Hugging Face Inference API를 사용한 벡터화 모듈 (공식 클라이언트 사용)
+Hugging Face Inference API를 사용한 벡터화 모듈 (직접 REST API 호출)
 """
 
 import numpy as np
-from huggingface_hub import InferenceClient
+import requests
 from typing import List, Optional
 import os
 import time
@@ -12,8 +12,10 @@ import time
 class HuggingFaceAPIVectorizer:
     """
     Hugging Face Inference API를 사용한 벡터화 클래스
-    공식 InferenceClient 라이브러리 사용 (자동 라우팅)
+    직접 REST API 호출 방식 (커스텀 모델 지원)
     """
+
+    API_URL_TEMPLATE = "https://api-inference.huggingface.co/models/{model_id}"
 
     def __init__(
         self,
@@ -35,16 +37,24 @@ class HuggingFaceAPIVectorizer:
                 "환경변수 HF_TOKEN을 설정하거나 api_token 파라미터를 전달하세요."
             )
 
-        # InferenceClient 초기화 (hf-inference provider 명시)
-        self.client = InferenceClient(
-            model=model_id,
-            token=self.api_token,
-            provider="hf-inference",
-        )
+        self.api_url = self.API_URL_TEMPLATE.format(model_id=model_id)
+        self.headers = {"Authorization": f"Bearer {self.api_token}"}
 
         print(f"✓ Hugging Face API Vectorizer 초기화 완료")
         print(f"  - Model: {model_id}")
-        print(f"  - API: Hugging Face Inference API (공식 클라이언트)")
+        print(f"  - API URL: {self.api_url}")
+
+    def _query(self, text: str) -> dict:
+        """Hugging Face Inference API에 직접 POST 요청"""
+        payload = {
+            "inputs": text,
+            "options": {"wait_for_model": True},
+        }
+        response = requests.post(
+            self.api_url, headers=self.headers, json=payload, timeout=60
+        )
+        response.raise_for_status()
+        return response.json()
 
     def encode(self, text: str, max_retries: int = 3) -> np.ndarray:
         """
@@ -62,14 +72,17 @@ class HuggingFaceAPIVectorizer:
 
         for attempt in range(max_retries):
             try:
-                # feature_extraction: 문장 임베딩 반환
-                response = self.client.feature_extraction(text)
+                result = self._query(text)
 
                 # numpy 배열로 변환
-                embedding = np.array(response)
+                embedding = np.array(result)
 
-                # 2D (토큰 x hidden) → Mean Pooling
-                if embedding.ndim == 2:
+                # 3D (1 x tokens x hidden) → squeeze 후 mean pooling
+                if embedding.ndim == 3:
+                    embedding = embedding.squeeze(0)  # (tokens, hidden)
+                    return np.mean(embedding, axis=0)
+                # 2D (tokens x hidden) → Mean Pooling
+                elif embedding.ndim == 2:
                     return np.mean(embedding, axis=0)
                 # 1D (이미 문장 벡터) → 그대로 반환
                 elif embedding.ndim == 1:
@@ -77,13 +90,14 @@ class HuggingFaceAPIVectorizer:
                 else:
                     return np.zeros(768)
 
-            except Exception as e:
+            except requests.exceptions.HTTPError as e:
                 error_msg = str(e)
+                status_code = e.response.status_code if e.response is not None else 0
 
                 # 모델 로딩 중 (503)
-                if "loading" in error_msg.lower() or "503" in error_msg:
+                if status_code == 503:
                     if attempt < max_retries - 1:
-                        wait_time = 5 * (attempt + 1)  # 5초, 10초, 15초
+                        wait_time = 10 * (attempt + 1)  # 10초, 20초, 30초
                         print(
                             f"⏳ 모델 로딩 중... {wait_time}초 후 재시도 ({attempt+1}/{max_retries})"
                         )
@@ -91,10 +105,25 @@ class HuggingFaceAPIVectorizer:
                         continue
                     else:
                         raise Exception(
-                            f"모델 로딩 타임아웃 (30초 대기). "
+                            f"모델 로딩 타임아웃. "
                             f"Hugging Face에서 모델이 아직 준비되지 않았습니다. "
                             f"1-2분 후 다시 시도해주세요. 원본 에러: {error_msg}"
                         )
+
+                # 429 Rate Limit
+                if status_code == 429:
+                    if attempt < max_retries - 1:
+                        wait_time = 5 * (attempt + 1)
+                        print(f"⏳ Rate limit - {wait_time}초 후 재시도")
+                        time.sleep(wait_time)
+                        continue
+
+                raise Exception(
+                    f"API 호출 실패 (HTTP {status_code}): {error_msg}"
+                )
+
+            except Exception as e:
+                error_msg = str(e)
 
                 # 기타 오류
                 if attempt < max_retries - 1:
