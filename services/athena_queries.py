@@ -196,7 +196,29 @@ def load_products_data_from_athena(
 
     where_clause = ""
     if categories:
-        cat_list = quote_list(categories)
+        # SUB_ALIAS 역매핑: "리무버" → ["립메이크업/포인트리무버", "립/아이리무버"]
+        ALIAS_REVERSE = {
+            "리무버": ["립메이크업/포인트리무버", "립/아이리무버", "아이메이크업/포인트리무버", "립 메이크업/포인트리무버"],
+            "알로에/수딩/애프터선": ["알로에/수딩/에프터선"],
+        }
+        
+        expanded_cats = []
+        for c in categories:
+            # 원본 추가
+            expanded_cats.append(c)
+            # alias가 있으면 원본 카테고리들도 추가
+            if c in ALIAS_REVERSE:
+                expanded_cats.extend(ALIAS_REVERSE[c])
+        
+        # sub_category(정규화된 값: /구분)와 Athena category(_구분, 공백 포함) 모두 매칭
+        all_variants = []
+        for c in expanded_cats:
+            all_variants.append(c)  # 슬래시 버전
+            all_variants.append(c.replace("/", "_"))  # 언더스코어 버전
+            all_variants.append(c.replace("/", " "))  # 공백 버전
+        
+        all_cats = list(set(all_variants))
+        cat_list = quote_list(all_cats)
         where_clause = f"WHERE category IN ({cat_list})"
 
     sql = f"""
@@ -211,7 +233,7 @@ def load_products_data_from_athena(
         product_url,
         price,
         top_keywords,
-        product_vector_roberta_semantic
+        {vector_col}
     FROM {table_name}
     {where_clause}
     """
@@ -221,6 +243,7 @@ def load_products_data_from_athena(
     # 벡터 JSON 파싱
     if (
         not df.empty
+        and vector_col in df.columns
         and df[vector_col].dtype == object
         and isinstance(df[vector_col].iloc[0], str)
     ):
