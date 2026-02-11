@@ -192,7 +192,9 @@ def _render_review_pagination(
     reviews_df: pd.DataFrame, review_type: str, product_id: str, skip_scroll_callback
 ):
     """개별 리뷰 페이지네이션 렌더링 (fragment로 독립 실행)"""
-    page_key = f"rep_review_page_{review_type}_{product_id}"
+    # 캐시 ID를 키에 포함하여 중복 방지
+    cache_id = st.session_state.get("_analysis_cache_product_id", product_id)
+    page_key = f"rep_review_page_{review_type}_{cache_id}"
 
     if page_key not in st.session_state:
         st.session_state[page_key] = 0
@@ -255,7 +257,7 @@ def _render_review_pagination(
             on_click=prev_page,
             disabled=(page == 0),
             use_container_width=True,
-            key=f"rep_prev_{review_type}_{product_id}",
+            key=f"rep_prev_{review_type}_{cache_id}",
         )
     with col_m:
         st.markdown(
@@ -268,7 +270,7 @@ def _render_review_pagination(
             on_click=next_page,
             disabled=(page >= total - 1),
             use_container_width=True,
-            key=f"rep_next_{review_type}_{product_id}",
+            key=f"rep_next_{review_type}_{cache_id}",
         )
 
 

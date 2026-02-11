@@ -489,6 +489,9 @@ def main():
                 pos_cache = st.session_state.get("_rep_positive_reviews_df_cache")
                 neg_cache = st.session_state.get("_rep_negative_reviews_df_cache")
                 if pos_cache is not None or neg_cache is not None:
+                    # 기존 컨테이너 비우고 다시 렌더링
+                    container_pos_review.empty()
+                    container_neg_review.empty()
                     render_representative_review(
                         container_pos_review,
                         container_neg_review,
@@ -498,10 +501,12 @@ def main():
                     )
 
                 # AI 요약 복구 렌더링
+                container_ai_summary.empty()
                 render_ai_review_summary(container_ai_summary, product_info)
 
                 trend_cache = st.session_state.get("_reviews_df_cache")
                 if trend_cache is not None:
+                    container_trend.empty()
                     render_rating_trend(
                         container_trend, trend_cache, skip_scroll_apply_once
                     )
@@ -510,38 +515,36 @@ def main():
                     st.subheader("✨ AI 리뷰 요약")
                     st.info("💬 리뷰 데이터를 불러오는 중입니다...")
 
-            # 상품이 바뀐 경우만 비동기 재로딩
-            if st.session_state.get("last_loaded_product_id") != product_id:
-                # 순간 잔상 제거용
-                st.session_state["_rep_review_df_cache"] = None
-                st.session_state["_reviews_df_cache"] = None
-                st.session_state["_rep_reviews_df_cache"] = None
-                st.session_state["_rep_positive_reviews_df_cache"] = None
-                st.session_state["_rep_negative_reviews_df_cache"] = None
-                # 이전 상품 AI 요약 캐시 제거
-                old_pid = st.session_state.get("_analysis_cache_product_id")
-                if old_pid:
-                    st.session_state.pop(f"ai_summary_{old_pid}", None)
-                st.session_state["_analysis_cache_product_id"] = str(product_id)
+                # 상품이 바뀐 경우만 비동기 재로딩
+                if st.session_state.get("last_loaded_product_id") != product_id:
+                    # 순간 잔상 제거용
+                    st.session_state["_rep_review_df_cache"] = None
+                    st.session_state["_reviews_df_cache"] = None
+                    st.session_state["_rep_reviews_df_cache"] = None
+                    st.session_state["_rep_positive_reviews_df_cache"] = None
+                    st.session_state["_rep_negative_reviews_df_cache"] = None
+                    # 이전 상품 AI 요약 캐시 제거
+                    old_pid = st.session_state.get("_analysis_cache_product_id")
+                    if old_pid:
+                        st.session_state.pop(f"ai_summary_{old_pid}", None)
+                    st.session_state["_analysis_cache_product_id"] = str(product_id)
 
-                # 제품별 페이지 키 리셋
-                page_key = (
-                    f"rep_review_page_{st.session_state['_analysis_cache_product_id']}"
-                )
-                st.session_state[page_key] = 0
+                    # 제품별 페이지 키 리셋
+                    page_key = f"rep_review_page_{st.session_state['_analysis_cache_product_id']}"
+                    st.session_state[page_key] = 0
 
-            if st.session_state.get("last_loaded_product_id") != product_id:
-                load_product_analysis_async(
-                    product_id,
-                    product_info,
-                    review_id,
-                    container_pos_review,
-                    container_neg_review,
-                    container_trend,
-                    skip_scroll_apply_once,
-                    container_ai_summary,
-                )
-                st.session_state["last_loaded_product_id"] = product_id
+                if st.session_state.get("last_loaded_product_id") != product_id:
+                    load_product_analysis_async(
+                        product_id,
+                        product_info,
+                        review_id,
+                        container_pos_review,
+                        container_neg_review,
+                        container_trend,
+                        skip_scroll_apply_once,
+                        container_ai_summary,
+                    )
+                    st.session_state["last_loaded_product_id"] = product_id
 
     # =========================
     # 추천/검색 헤더
