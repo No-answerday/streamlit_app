@@ -9,7 +9,7 @@ def sidebar(df):
     sidebar_disabled = bool(st.session_state.get("product_search"))
 
     if st.sidebar.button(
-        "🏠 홈으로 가기",
+        "홈으로 가기",
         use_container_width=True,
         disabled=False,
     ):
@@ -132,11 +132,11 @@ def sidebar(df):
                             key = f"sub_{main_cat}_{middle}_{sub}"
                             middle_sub_keys.append(key)
                             main_sub_keys.append(key)
-                        
+
                         def toggle_middle_all(keys, all_key):
                             val = st.session_state.get(all_key, False)
                             for k in keys:
-                                st.session_state[k] =  val
+                                st.session_state[k] = val
 
                         st.checkbox(
                             "전체 선택",

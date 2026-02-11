@@ -13,7 +13,7 @@ def render_product_info(product_info: pd.Series):
     Args:
         product_info: 제품 정보 Series
     """
-    st.subheader("🎁 선택한 제품 정보")
+    st.subheader("선택한 제품 정보")
 
     col1, col2, col3 = st.columns(3)
     col1.metric("제품명", product_info.get("product_name", ""))

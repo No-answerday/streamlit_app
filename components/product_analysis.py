@@ -17,14 +17,14 @@ from services.recommend_similar_products import recommend_similar_products
 def render_top_keywords(product_info: pd.Series):
     """대표 키워드 렌더링"""
     st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
-    st.markdown("### 📃 대표 키워드")
+    st.subheader("대표 키워드")
     top_kw = product_info.get("top_keywords_str", [])
     if isinstance(top_kw, str):
-        top_kw = [k.strip() for k in top_kw.split(",") if k.strip()] 
-    cols = st.columns(5) 
+        top_kw = [k.strip() for k in top_kw.split(",") if k.strip()]
+    cols = st.columns(5)
 
-    for col, kw in zip(cols, top_kw): 
-        with col: 
+    for col, kw in zip(cols, top_kw):
+        with col:
             st.markdown(
                 f""" 
                     <div style=" 
@@ -36,10 +36,11 @@ def render_top_keywords(product_info: pd.Series):
                 "> 
                 #{kw} 
                 </div> 
-                """, 
-                unsafe_allow_html=True, 
+                """,
+                unsafe_allow_html=True,
             )
     st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
+
 
 def render_representative_review(
     container_pos,
@@ -55,7 +56,7 @@ def render_representative_review(
         container_pos,
         positive_reviews_df,
         "positive",
-        "😊 긍정 대표 리뷰",
+        "긍정 대표 리뷰",
         pid,
         skip_scroll_callback,
     )
@@ -63,7 +64,7 @@ def render_representative_review(
         container_neg,
         negative_reviews_df,
         "negative",
-        "😟 부정 대표 리뷰",
+        "부정 대표 리뷰",
         pid,
         skip_scroll_callback,
     )
@@ -172,7 +173,7 @@ def render_rating_trend(container, reviews_df: pd.DataFrame, skip_scroll_callbac
     """평점 추이 렌더링"""
     with container.container():
         st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
-        st.markdown("### 📈 평점 추이")
+        st.subheader("평점 추이")
 
         if (
             reviews_df.empty
@@ -334,16 +335,16 @@ def load_product_analysis_async(
     """
     # 초기 로딩 메시지 표시
     with container_pos_review.container():
-        st.markdown("#### 😊 긍정 대표 리뷰")
+        st.markdown("긍정 대표 리뷰")
         st.info("긍정 대표 리뷰를 불러오는 중...")
 
     with container_neg_review.container():
-        st.markdown("#### 😟 부정 대표 리뷰")
+        st.markdown("부정 대표 리뷰")
         st.info("부정 대표 리뷰를 불러오는 중...")
 
     with container_trend.container():
-        st.markdown("### 📈 평점 추이")
-        st.info("📈 평점 데이터를 불러오는 중...")
+        st.markdown("평점 추이")
+        st.info("평점 데이터를 불러오는 중...")
 
     pid = str(product_id)
 
@@ -393,7 +394,7 @@ def load_product_analysis_async(
                         container_pos_review,
                         result,
                         "positive",
-                        "😊 긍정 대표 리뷰",
+                        "긍정 대표 리뷰",
                         pid,
                         skip_scroll_callback,
                     )
@@ -405,7 +406,7 @@ def load_product_analysis_async(
                         container_neg_review,
                         result,
                         "negative",
-                        "😟 부정 대표 리뷰",
+                        "부정 대표 리뷰",
                         pid,
                         skip_scroll_callback,
                     )
@@ -440,16 +441,16 @@ def load_product_analysis_async(
                 if task_type == "REVIEW_POSITIVE":
                     st.session_state["_rep_positive_reviews_df_cache"] = pd.DataFrame()
                     with container_pos_review.container():
-                        st.markdown("#### 😊 긍정 대표 리뷰")
+                        st.markdown("긍정 대표 리뷰")
                         st.error(f"로드 실패: {e}")
                 elif task_type == "REVIEW_NEGATIVE":
                     st.session_state["_rep_negative_reviews_df_cache"] = pd.DataFrame()
                     with container_neg_review.container():
-                        st.markdown("#### 😟 부정 대표 리뷰")
+                        st.markdown("부정 대표 리뷰")
                         st.error(f"로드 실패: {e}")
                 elif task_type == "TREND":
                     with container_trend.container():
-                        st.markdown("### 📈 평점 추이")
+                        st.markdown("평점 추이")
                         st.error(f"평점 추이 로드 실패: {e}")
                 elif task_type == "RECO":
                     st.error(f"추천 상품 로드 실패: {e}")
