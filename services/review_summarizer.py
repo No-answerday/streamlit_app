@@ -40,15 +40,23 @@ class ReviewSummarizer:
                 max_tokens=max_tokens,
                 temperature=0.5,
             )
-            return response.choices[0].message.content.strip()
+            result = response.choices[0].message.content.strip()
+
+            # 후처리: 장점/단점/추천 소비자 키워드 앞에 줄바꿈 추가 (HTML <br> 사용)
+            import re
+
+            result = re.sub(r"\s*단점:", "<br>단점:", result)
+            result = re.sub(r"\s*추천 소비자:", "<br>추천 소비자:", result)
+
+            return result
         except Exception as e:
             error_msg = str(e)
             print(f"[ReviewSummarizer] 요약 생성 실패: {error_msg}")
             if "503" in error_msg:
-                return "🔄 AI 모델이 로딩 중입니다. 잠시 후 다시 시도해주세요."
+                return "AI 모델이 로딩 중입니다. 잠시 후 다시 시도해주세요."
             if "429" in error_msg:
-                return "⏰ 요청이 너무 많습니다. 잠시 후 다시 시도해주세요."
-            return "❌ 요약 생성 중 오류가 발생했습니다."
+                return "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."
+            return "요약 생성 중 오류가 발생했습니다."
 
     def summarize_reviews(
         self,
@@ -90,12 +98,13 @@ class ReviewSummarizer:
 [부정 리뷰]
 {chr(10).join(f'- {r}' for r in neg_texts) if neg_texts else '- 없음'}
 
-위 리뷰를 바탕으로 아래 형식에 맞춰 한국어 3~4문장으로 요약해주세요:
-1. 이 제품의 가장 큰 장점
-2. 사용자들이 언급한 단점이나 주의사항
-3. 어떤 사용자에게 추천하는지
+위 리뷰를 바탕으로 반드시 아래 형식에 맞춰 한국어로 요약해주세요:
 
-답변은 반드시 한국어로만 작성하세요."""
+장점: [이 제품의 가장 큰 장점을 1~2문장으로]
+단점: [사용자들이 언급한 단점이나 주의사항을 1~2문장으로, 없으면 '특별히 언급된 단점 없음']
+추천 소비자: [어떤 사용자에게 추천하는지 1문장으로]
+
+반드시 위 형식(장점:/단점:/추천 소비자:)을 지켜서 작성."""
 
         return self._call_api(prompt)
 

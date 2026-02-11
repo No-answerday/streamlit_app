@@ -469,26 +469,20 @@ def main():
             product_id = product_info.get("product_id", "")
             review_id = product_info.get("representative_review_id_roberta", None)
 
-            # AI 리뷰 요약 컨테이너 (비동기 리뷰 로딩 완료 후 렌더링)
-            container_ai_summary = st.empty()
-
-            # rerun시 캐시로 AI 요약 복구 렌더
-            cache_pid = st.session_state.get("_analysis_cache_product_id")
-            same_product_cache = str(product_id) == str(cache_pid)
-
-            if same_product_cache:
-                render_ai_review_summary(container_ai_summary, product_info)
-            else:
-                with container_ai_summary.container():
-                    st.subheader("AI 리뷰 요약")
-                    st.info("리뷰 데이터를 불러오는 중입니다...")
-
             st.subheader("대표 리뷰")
             st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
 
             container_pos_review = st.empty()
             container_neg_review = st.empty()
+
+            # AI 리뷰 요약 컨테이너 (비동기 리뷰 로딩 완료 후 렌더링)
+            container_ai_summary = st.empty()
+
             container_trend = st.empty()
+
+            # rerun시 캐시로 AI 요약 복구 렌더
+            cache_pid = st.session_state.get("_analysis_cache_product_id")
+            same_product_cache = str(product_id) == str(cache_pid)
 
             # rerun시에도 캐시로 복구 렌더
             if same_product_cache:
@@ -503,11 +497,18 @@ def main():
                         skip_scroll_apply_once,
                     )
 
+                # AI 요약 복구 렌더링
+                render_ai_review_summary(container_ai_summary, product_info)
+
                 trend_cache = st.session_state.get("_reviews_df_cache")
                 if trend_cache is not None:
                     render_rating_trend(
                         container_trend, trend_cache, skip_scroll_apply_once
                     )
+            else:
+                with container_ai_summary.container():
+                    st.subheader("✨ AI 리뷰 요약")
+                    st.info("💬 리뷰 데이터를 불러오는 중입니다...")
 
             # 상품이 바뀐 경우만 비동기 재로딩
             if st.session_state.get("last_loaded_product_id") != product_id:
