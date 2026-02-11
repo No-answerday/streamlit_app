@@ -22,6 +22,7 @@ from components.search_bar import (
 from components.product_info import render_product_info
 from components.product_analysis import (
     render_top_keywords,
+    render_ai_review_summary,
     load_product_analysis_async,
     render_representative_review,
     render_rating_trend,
@@ -182,7 +183,7 @@ def render_recommendation_section(df: pd.DataFrame, selected_product: str):
         if st.session_state.get("reco_cache_key") != cache_key:
             # 비동기 작업 자체가 아직 완료되지 않은 경우
             if st.session_state.get("reco_target_product_id") != target_product_id:
-                st.info("🔍 유사한 상품을 찾고 있습니다...")
+                st.info("유사한 상품을 찾고 있습니다...")
                 return
 
             # 카테고리가 변경되어 재검색 필요
@@ -375,10 +376,10 @@ def main():
                                 f"카테고리: {', '.join(detected_categories)}"
                             )
 
-                        if filter_messages:
-                            st.info(
-                                f"🎯 {' | '.join(filter_messages)} 제품 중에서 검색합니다."
-                            )
+                        # if filter_messages:
+                        # st.info(
+                        #     f"{' | '.join(filter_messages)} 제품 중에서 검색합니다."
+                        # )
 
                         reco_results = recommend_similar_products(
                             query_text=search_keyword_pre,
@@ -468,6 +469,20 @@ def main():
             product_id = product_info.get("product_id", "")
             review_id = product_info.get("representative_review_id_roberta", None)
 
+            # AI 리뷰 요약 컨테이너 (비동기 리뷰 로딩 완료 후 렌더링)
+            container_ai_summary = st.empty()
+
+            # rerun시 캐시로 AI 요약 복구 렌더
+            cache_pid = st.session_state.get("_analysis_cache_product_id")
+            same_product_cache = str(product_id) == str(cache_pid)
+
+            if same_product_cache:
+                render_ai_review_summary(container_ai_summary, product_info)
+            else:
+                with container_ai_summary.container():
+                    st.subheader("AI 리뷰 요약")
+                    st.info("리뷰 데이터를 불러오는 중입니다...")
+
             st.subheader("대표 리뷰")
             st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
 
@@ -476,9 +491,6 @@ def main():
             container_trend = st.empty()
 
             # rerun시에도 캐시로 복구 렌더
-            cache_pid = st.session_state.get("_analysis_cache_product_id")
-            same_product_cache = str(product_id) == str(cache_pid)
-
             if same_product_cache:
                 pos_cache = st.session_state.get("_rep_positive_reviews_df_cache")
                 neg_cache = st.session_state.get("_rep_negative_reviews_df_cache")
@@ -505,6 +517,10 @@ def main():
                 st.session_state["_rep_reviews_df_cache"] = None
                 st.session_state["_rep_positive_reviews_df_cache"] = None
                 st.session_state["_rep_negative_reviews_df_cache"] = None
+                # 이전 상품 AI 요약 캐시 제거
+                old_pid = st.session_state.get("_analysis_cache_product_id")
+                if old_pid:
+                    st.session_state.pop(f"ai_summary_{old_pid}", None)
                 st.session_state["_analysis_cache_product_id"] = str(product_id)
 
                 # 제품별 페이지 키 리셋
@@ -522,6 +538,7 @@ def main():
                     container_neg_review,
                     container_trend,
                     skip_scroll_apply_once,
+                    container_ai_summary,
                 )
                 st.session_state["last_loaded_product_id"] = product_id
 
@@ -539,7 +556,7 @@ def main():
             search_type_header = st.session_state.get("search_type", "키워드")
             if search_type_header == "문맥" and search_keyword_pre:
                 st.markdown("---")
-                st.subheader(f'🔍 문맥 검색 결과: "{search_keyword_pre}"')
+                st.subheader(f'문맥 검색 결과: "{search_keyword_pre}"')
 
             col_1, col_2 = st.columns([8, 2])
             with col_2:
