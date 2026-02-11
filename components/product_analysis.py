@@ -12,6 +12,7 @@ from utils.load_data import rating_trend
 from services.athena_queries import fetch_representative_review_text
 from utils.data_utils import load_reviews_athena, load_top_reviews_athena
 from services.recommend_similar_products import recommend_similar_products
+from services.review_summarizer import get_cached_summary
 
 
 def render_top_keywords(product_info: pd.Series):
@@ -40,6 +41,108 @@ def render_top_keywords(product_info: pd.Series):
                 unsafe_allow_html=True,
             )
     st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
+
+
+def _extract_review_texts(reviews_df: pd.DataFrame) -> list[str]:
+    """리뷰 DataFrame에서 텍스트 추출"""
+    texts = []
+    if reviews_df is None or reviews_df.empty:
+        return texts
+    for _, row in reviews_df.iterrows():
+        text = ""
+        if "full_text" in reviews_df.columns and pd.notna(row.get("full_text")):
+            text = str(row["full_text"])
+        if not text:
+            title = str(row.get("title") or "") if "title" in reviews_df.columns else ""
+            content = (
+                str(row.get("content") or "") if "content" in reviews_df.columns else ""
+            )
+            text = (title + " " + content).strip()
+        if text:
+            texts.append(text)
+    return texts
+
+
+def render_ai_review_summary(container, product_info: pd.Series):
+    """AI 리뷰 요약 렌더링 (컨테이너 기반, 캐시 활용)"""
+    product_name = product_info.get("product_name", "")
+    product_id = str(product_info.get("product_id", ""))
+
+    # 세션에 이미 요약이 있으면 바로 렌더링
+    summary_cache_key = f"ai_summary_{product_id}"
+    summary = st.session_state.get(summary_cache_key)
+
+    if summary:
+        with container.container():
+            st.subheader("AI 리뷰 요약")
+            st.markdown(
+                f"""
+                <div style="
+                    padding: 20px;
+                    border-radius: 12px;
+                    background: linear-gradient(135deg, #f0f4ff 0%, #f5f0ff 100%);
+                    border-left: 4px solid #6366f1;
+                    margin: 8px 0;
+                    line-height: 1.7;
+                ">
+                    {summary}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div style='height:32px;'></div>", unsafe_allow_html=True)
+    else:
+        with container.container():
+            st.subheader("AI 리뷰 요약")
+            st.info("💬 리뷰 데이터를 불러오는 중입니다...")
+
+
+def _generate_ai_summary(container, product_info: pd.Series):
+    """
+    리뷰 로딩 완료 후 AI 요약 생성 및 렌더링
+    (load_product_analysis_async에서 호출)
+    """
+    product_name = product_info.get("product_name", "")
+    product_id = str(product_info.get("product_id", ""))
+    summary_cache_key = f"ai_summary_{product_id}"
+
+    # 이미 생성된 요약이 있으면 스킵
+    if summary_cache_key in st.session_state:
+        render_ai_review_summary(container, product_info)
+        return
+
+    # 대표 키워드 추출
+    top_kw = product_info.get("top_keywords_str", "")
+    if isinstance(top_kw, list):
+        top_kw = ",".join(top_kw)
+
+    # 캐시된 리뷰 가져오기
+    pos_cache = st.session_state.get("_rep_positive_reviews_df_cache")
+    neg_cache = st.session_state.get("_rep_negative_reviews_df_cache")
+
+    pos_texts = _extract_review_texts(pos_cache)
+    neg_texts = _extract_review_texts(neg_cache)
+
+    if not pos_texts and not neg_texts:
+        with container.container():
+            st.subheader("AI 리뷰 요약")
+            st.info("요약할 리뷰 데이터가 없습니다.")
+        return
+
+    # AI 요약 생성
+    with container.container():
+        st.subheader("AI 리뷰 요약")
+        with st.spinner("🤖 AI가 리뷰를 분석하고 있습니다..."):
+            summary = get_cached_summary(
+                product_name=product_name,
+                keywords_str=top_kw,
+                positive_reviews_str="\n".join(pos_texts),
+                negative_reviews_str="\n".join(neg_texts),
+            )
+            st.session_state[summary_cache_key] = summary
+
+    # 생성 완료 후 렌더링
+    render_ai_review_summary(container, product_info)
 
 
 def render_representative_review(
@@ -89,7 +192,9 @@ def _render_review_pagination(
     reviews_df: pd.DataFrame, review_type: str, product_id: str, skip_scroll_callback
 ):
     """개별 리뷰 페이지네이션 렌더링 (fragment로 독립 실행)"""
-    page_key = f"rep_review_page_{review_type}_{product_id}"
+    # 캐시 ID를 키에 포함하여 중복 방지
+    cache_id = st.session_state.get("_analysis_cache_product_id", product_id)
+    page_key = f"rep_review_page_{review_type}_{cache_id}"
 
     if page_key not in st.session_state:
         st.session_state[page_key] = 0
@@ -152,7 +257,7 @@ def _render_review_pagination(
             on_click=prev_page,
             disabled=(page == 0),
             use_container_width=True,
-            key=f"rep_prev_{review_type}_{product_id}",
+            key=f"rep_prev_{review_type}_{cache_id}",
         )
     with col_m:
         st.markdown(
@@ -165,7 +270,7 @@ def _render_review_pagination(
             on_click=next_page,
             disabled=(page >= total - 1),
             use_container_width=True,
-            key=f"rep_next_{review_type}_{product_id}",
+            key=f"rep_next_{review_type}_{cache_id}",
         )
 
 
@@ -319,6 +424,7 @@ def load_product_analysis_async(
     container_neg_review,
     container_trend,
     skip_scroll_callback,
+    container_ai_summary=None,
 ):
     """
     비동기로 대표 리뷰, 평점 추이, 추천 상품 로드
@@ -332,6 +438,7 @@ def load_product_analysis_async(
         container_neg_review: 부정 리뷰 placeholder
         container_trend: 평점 추이 placeholder
         skip_scroll_callback: 스크롤 스킵 콜백
+        container_ai_summary: AI 요약 placeholder
     """
     # 초기 로딩 메시지 표시
     with container_pos_review.container():
@@ -347,6 +454,8 @@ def load_product_analysis_async(
         st.info("평점 데이터를 불러오는 중...")
 
     pid = str(product_id)
+
+    reviews_loaded = {"positive": False, "negative": False}
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         future_to_type = {}
@@ -381,6 +490,7 @@ def load_product_analysis_async(
             future_to_type[f_reco] = "RECO"
 
         # 도착 즉시 세션 상태 업데이트 + 컨테이너 렌더링
+
         for future in as_completed(future_to_type):
             task_type = future_to_type[future]
 
@@ -390,6 +500,7 @@ def load_product_analysis_async(
                 if task_type == "REVIEW_POSITIVE":
                     st.session_state["_rep_positive_reviews_df_cache"] = result
                     st.session_state["_analysis_cache_product_id"] = pid
+                    reviews_loaded["positive"] = True
                     _render_single_review_section(
                         container_pos_review,
                         result,
@@ -402,6 +513,7 @@ def load_product_analysis_async(
                 elif task_type == "REVIEW_NEGATIVE":
                     st.session_state["_rep_negative_reviews_df_cache"] = result
                     st.session_state["_analysis_cache_product_id"] = pid
+                    reviews_loaded["negative"] = True
                     _render_single_review_section(
                         container_neg_review,
                         result,
@@ -440,11 +552,13 @@ def load_product_analysis_async(
             except Exception as e:
                 if task_type == "REVIEW_POSITIVE":
                     st.session_state["_rep_positive_reviews_df_cache"] = pd.DataFrame()
+                    reviews_loaded["positive"] = True
                     with container_pos_review.container():
                         st.markdown("긍정 대표 리뷰")
                         st.error(f"로드 실패: {e}")
                 elif task_type == "REVIEW_NEGATIVE":
                     st.session_state["_rep_negative_reviews_df_cache"] = pd.DataFrame()
+                    reviews_loaded["negative"] = True
                     with container_neg_review.container():
                         st.markdown("부정 대표 리뷰")
                         st.error(f"로드 실패: {e}")
@@ -454,3 +568,11 @@ def load_product_analysis_async(
                         st.error(f"평점 추이 로드 실패: {e}")
                 elif task_type == "RECO":
                     st.error(f"추천 상품 로드 실패: {e}")
+
+    # 긍부정 리뷰 로딩 완료 후 AI 요약 생성
+    if (
+        container_ai_summary
+        and reviews_loaded["positive"]
+        and reviews_loaded["negative"]
+    ):
+        _generate_ai_summary(container_ai_summary, product_info)
