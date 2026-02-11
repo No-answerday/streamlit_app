@@ -512,8 +512,8 @@ def main():
                     )
             else:
                 with container_ai_summary.container():
-                    st.subheader("✨ AI 리뷰 요약")
-                    st.info("💬 리뷰 데이터를 불러오는 중입니다...")
+                    st.subheader("AI 리뷰 요약")
+                    st.info("리뷰 데이터를 불러오는 중입니다...")
 
                 # 상품이 바뀐 경우만 비동기 재로딩
                 if st.session_state.get("last_loaded_product_id") != product_id:

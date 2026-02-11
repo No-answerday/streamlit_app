@@ -158,8 +158,8 @@ def render_recommendation_card(row: pd.Series, on_select_callback):
                 </div>
 
                 <div style="margin-top:6px;font-size:13px;color:#555;">
-                🔗 유사도: {float(row.get('similarity',0.0)):.3f}<br>
-                ⭐ 추천 점수: {float(row.get('reco_score',0.0)):.3f}
+                유사도: {float(row.get('similarity',0.0)):.3f}<br>
+                추천 점수: {float(row.get('reco_score',0.0)):.3f}
                 </div>
                 """,
                 unsafe_allow_html=True,
