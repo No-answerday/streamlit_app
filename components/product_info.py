@@ -26,7 +26,7 @@ def render_product_info(product_info: pd.Series):
 
     with col_details:
         # 이미지 높이에 맞춰 수직 정렬
-        st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:5px;'></div>", unsafe_allow_html=True)
 
         col1, col2, col3 = st.columns(3)
         col1.metric("제품명", product_info.get("product_name", ""))
@@ -40,14 +40,14 @@ def render_product_info(product_info: pd.Series):
         )
         col3.metric("피부 타입", product_info.get("skin_type", ""))
 
-        st.markdown("<div style='height:5px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:1px;'></div>", unsafe_allow_html=True)
 
         col4, col5, col6 = st.columns(3)
         col4.metric("가격", f"₩{int(product_info.get('price', 0) or 0):,}")
         col5.metric("리뷰 수", f"{int(product_info.get('total_reviews', 0) or 0):,}")
         col6.metric("카테고리", product_info.get("sub_category", ""))
 
-        st.markdown("<div style='height:60px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
 
         if product_info.get("product_url"):
             st.link_button("상품 페이지", str(product_info["product_url"]))
