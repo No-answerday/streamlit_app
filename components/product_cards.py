@@ -251,7 +251,7 @@ def _render_category_section(
     category_display = (
         category_name if pd.notna(category_name) and category_name else "기타"
     )
-    st.markdown(f"## 📦 {category_display}")
+    st.markdown(f"## {category_display}")
 
     if category_count == 1:
         # 카테고리가 1개면 이미 10개씩 페이지네이션 된 상태

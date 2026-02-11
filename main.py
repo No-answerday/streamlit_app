@@ -1,5 +1,5 @@
 """
-🎀 화장품 추천 대시보드 - 메인 앱
+화장품 추천 대시보드 - 메인 앱
 """
 
 import streamlit as st
@@ -114,7 +114,7 @@ def select_product_from_reco(product_name: str):
 def render_recommendation_section(df: pd.DataFrame, selected_product: str):
     """추천 상품 섹션 렌더링"""
     st.markdown("<div style='height:64px;'></div>", unsafe_allow_html=True)
-    st.subheader("👍 이 상품과 유사한 추천 상품")
+    st.subheader("이 상품과 유사한 추천 상품")
 
     col_1, col_2, col_3 = st.columns([5, 2, 3])
 
@@ -243,7 +243,7 @@ def main():
 
     st.set_page_config(
         page_title="화장품 추천 대시보드",
-        page_icon="🎀",
+        page_icon="",
         layout="wide",
     )
 
@@ -264,7 +264,7 @@ def main():
     )
 
     # 메인 타이틀
-    st.title("🎀 화장품 추천 대시보드")
+    st.title("화장품 추천 대시보드")
     st.markdown("---")
 
     # =========================
@@ -343,7 +343,7 @@ def main():
                         # 전체 데이터를 피부 타입으로 미리 필터링
                         search_data = df
                         filter_messages = []
-                        
+
                         if detected_skin_types:
                             # 복합성 → 복합/혼합으로 매핑
                             skin_filter = []
@@ -360,15 +360,25 @@ def main():
                                 else:
                                     skin_filter.append(skin)
 
-                            search_data = search_data[search_data["skin_type"].isin(skin_filter)]
-                            filter_messages.append(f"피부 타입: {', '.join(detected_skin_types)}")
-                        
+                            search_data = search_data[
+                                search_data["skin_type"].isin(skin_filter)
+                            ]
+                            filter_messages.append(
+                                f"피부 타입: {', '.join(detected_skin_types)}"
+                            )
+
                         if detected_categories:
-                            search_data = search_data[search_data["category"].isin(detected_categories)]
-                            filter_messages.append(f"카테고리: {', '.join(detected_categories)}")
-                        
+                            search_data = search_data[
+                                search_data["category"].isin(detected_categories)
+                            ]
+                            filter_messages.append(
+                                f"카테고리: {', '.join(detected_categories)}"
+                            )
+
                         if filter_messages:
-                            st.info(f"🎯 {' | '.join(filter_messages)} 제품 중에서 검색합니다.")
+                            st.info(
+                                f"🎯 {' | '.join(filter_messages)} 제품 중에서 검색합니다."
+                            )
 
                         reco_results = recommend_similar_products(
                             query_text=search_keyword_pre,
@@ -438,7 +448,7 @@ def main():
     # =========================
     if selected_product:
         st.caption(
-            "🔒 상품 선택 상태에서는 검색 모드가 적용되지 않습니다. 재검색하려면 상품 선택을 취소해주세요."
+            "상품 선택 상태에서는 검색 모드가 적용되지 않습니다. 재검색하려면 상품 선택을 취소해주세요."
         )
         with st.spinner("정보를 불러오는 중입니다..."):
             product_rows = df[df["product_name"] == selected_product]
@@ -458,7 +468,7 @@ def main():
             product_id = product_info.get("product_id", "")
             review_id = product_info.get("representative_review_id_roberta", None)
 
-            st.markdown("### ✒️ 대표 리뷰")
+            st.subheader("대표 리뷰")
             st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
 
             container_pos_review = st.empty()
